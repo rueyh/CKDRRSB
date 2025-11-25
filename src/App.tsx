@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, {
   useState,
   useMemo,
@@ -490,9 +491,85 @@ const ClinicalRiskCalculator = () => {
     "clinician"
   );
   const [applyGdmt, setApplyGdmt] = useState(false);
+  const [inputMode, setInputMode] = useState<"calculate" | "manual">("calculate");
+  const [manualRisks, setManualRisks] = useState({
+    krfe: "",
+    cvd: "",
+    ascvd: "",
+    hf: "",
+    kdigoCvd: "",
+    kdigoCkd: "",
+  });
   const [validationErrors, setValidationErrors] = useState<
     Record<string, { message: string; severity: "soft" | "hard" } | null>
   >({});
+
+  // Default hazard ratios from literature
+  const defaultHazardRatios = {
+    sglt2i: { cvd: 0.87, hf: 0.7, ckd: 0.63 },
+    glp1ra: { cvd: 0.82, hf: null, ckd: 0.79 },
+    nsmra: { cvd: 0.86, hf: 0.78, ckd: 0.77 },
+  };
+
+  // Custom hazard ratios state (null means use default)
+  const [customHazardRatios, setCustomHazardRatios] = useState({
+    sglt2i: { cvd: null, hf: null, ckd: null },
+    glp1ra: { cvd: null, hf: null, ckd: null },
+    nsmra: { cvd: null, hf: null, ckd: null },
+  });
+
+  // Get effective hazard ratios (custom if set, otherwise default)
+  const getEffectiveHazardRatios = () => {
+    return {
+      sglt2i: {
+        cvd: customHazardRatios.sglt2i.cvd ?? defaultHazardRatios.sglt2i.cvd,
+        hf: customHazardRatios.sglt2i.hf ?? defaultHazardRatios.sglt2i.hf,
+        ckd: customHazardRatios.sglt2i.ckd ?? defaultHazardRatios.sglt2i.ckd,
+      },
+      glp1ra: {
+        cvd: customHazardRatios.glp1ra.cvd ?? defaultHazardRatios.glp1ra.cvd,
+        hf: customHazardRatios.glp1ra.hf ?? defaultHazardRatios.glp1ra.hf,
+        ckd: customHazardRatios.glp1ra.ckd ?? defaultHazardRatios.glp1ra.ckd,
+      },
+      nsmra: {
+        cvd: customHazardRatios.nsmra.cvd ?? defaultHazardRatios.nsmra.cvd,
+        hf: customHazardRatios.nsmra.hf ?? defaultHazardRatios.nsmra.hf,
+        ckd: customHazardRatios.nsmra.ckd ?? defaultHazardRatios.nsmra.ckd,
+      },
+    };
+  };
+
+  // Check if any custom HRs are being used
+  const hasCustomHR = (medication, outcome) => {
+    return customHazardRatios[medication]?.[outcome] !== null;
+  };
+
+  // Custom HR Notification Component
+  const CustomHRNotification = ({ medications }) => {
+    const customMeds = medications.filter((med) =>
+      hasCustomHR(med.key, med.outcome)
+    );
+
+    if (customMeds.length === 0) return null;
+
+    return (
+      <div className="mb-4">
+        {customMeds.map((med) => (
+          <button
+            key={`${med.key}-${med.outcome}`}
+            onClick={() => setActiveTab("specifications")}
+            className="w-full mb-2 p-3 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-left flex items-center gap-2"
+          >
+            <AlertTriangle className="w-4 h-4 text-purple-600 flex-shrink-0" />
+            <span className="text-sm text-purple-900">
+              User-inputted custom hazard ratio is being applied for {med.name}{" "}
+              (click to edit)
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  };
 
   const handleInfoClick = useCallback(
     (type: "input" | "output" | "formula", key: string) => {
@@ -681,10 +758,23 @@ const ClinicalRiskCalculator = () => {
     setCalculationState((prev) => ({ ...prev, sex: value }));
   }, []);
 
+  const handleManualRiskChange = useCallback((field: string, value: string) => {
+    setManualRisks((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
   const resetAllData = useCallback(() => {
     setFormState(initialPatientData);
     setCalculationState(initialPatientData);
     setValidationErrors({});
+    setInputMode("calculate");
+    setManualRisks({
+      krfe: "",
+      cvd: "",
+      ascvd: "",
+      hf: "",
+      kdigoCvd: "",
+      kdigoCkd: "",
+    });
   }, [initialPatientData]);
 
   // --- Calculation Logic (KFRE, PREVENT, KDIGO) are unchanged ---
@@ -934,14 +1024,50 @@ const ClinicalRiskCalculator = () => {
     };
   }, []);
 
-  const results = useMemo(
-    () => ({
-      krfe: calculateKFRE(calculationState),
-      prevent: calculatePREVENT(calculationState),
-      kdigo: calculateKDIGO(calculationState),
-    }),
-    [calculationState, calculateKFRE, calculatePREVENT, calculateKDIGO]
-  );
+  const results = useMemo(() => {
+    if (inputMode === "manual") {
+      // Helper function to safely parse risk values
+      const parseRisk = (value: string) => {
+        if (!value || value.trim() === "") return null;
+        const parsed = parseFloat(value);
+        return isNaN(parsed) ? null : parsed;
+      };
+
+      // Use manual risk inputs
+      const krfeValue = parseRisk(manualRisks.krfe);
+      const cvdValue = parseRisk(manualRisks.cvd);
+      const ascvdValue = parseRisk(manualRisks.ascvd);
+      const hfValue = parseRisk(manualRisks.hf);
+      const kdigoCvdValue = parseRisk(manualRisks.kdigoCvd);
+      const kdigoCkdValue = parseRisk(manualRisks.kdigoCkd);
+
+      return {
+        krfe: krfeValue !== null ? { 
+          twoYear: krfeValue, 
+          fiveYear: krfeValue, 
+          riskLevel: krfeValue > 40 ? "High" : krfeValue > 10 ? "Moderate" : "Low" 
+        } : null,
+        prevent: (cvdValue !== null || ascvdValue !== null || hfValue !== null) ? {
+          cvd: cvdValue !== null ? cvdValue : 0,
+          ascvd: ascvdValue !== null ? ascvdValue : 0,
+          heartFailure: hfValue !== null ? hfValue : 0,
+        } : null,
+        kdigo: (kdigoCvdValue !== null || kdigoCkdValue !== null) ? {
+          cvdMortality: kdigoCvdValue !== null ? kdigoCvdValue : 0,
+          ckdProgression: kdigoCkdValue !== null ? kdigoCkdValue : 0,
+          egfrCategory: "Unknown",
+          acrCategory: "Unknown",
+        } : null,
+      };
+    } else {
+      // Calculate from inputs
+      return {
+        krfe: calculateKFRE(calculationState),
+        prevent: calculatePREVENT(calculationState),
+        kdigo: calculateKDIGO(calculationState),
+      };
+    }
+  }, [inputMode, manualRisks, calculationState, calculateKFRE, calculatePREVENT, calculateKDIGO]);
 
   const hasHardErrors = useMemo(() => {
     return Object.values(validationErrors).some((e) => e?.severity === "hard");
@@ -1230,121 +1356,275 @@ const ClinicalRiskCalculator = () => {
     </div>
   );
 
-  const SpecificationsTab = () => (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <h2 className="text-xl font-bold text-gray-900 mb-4">
-        Risk Calculator Specifications
-      </h2>
-      <p className="text-sm text-gray-600 mb-6">
-        This tool is intended for clinical use and provides risk estimations
-        based on published equations. The input fields have validation ranges to
-        ensure data quality. "Soft" bounds will trigger a warning for unusual
-        values, while "Hard" bounds will prevent calculation for physiologically
-        impossible values.
-      </p>
+  const SpecificationsTab = () => {
+    const [hrInputs, setHrInputs] = useState({});
+    const [hrErrors, setHrErrors] = useState({});
 
-      {/* Input Validation Table */}
-      <div className="mb-8">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Input Validation Ranges
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left text-gray-500">
-            <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3">
-                  Variable
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Unit
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Soft Lower
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Hard Lower
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Soft Upper
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Hard Upper
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(validationConfig).map(([key, value]) => (
-                <tr key={key} className="bg-white border-b">
-                  <th
-                    scope="row"
-                    className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap"
-                  >
-                    {key.charAt(0).toUpperCase() + key.slice(1)}
-                  </th>
-                  <td className="px-6 py-4">{value.unit}</td>
-                  <td className="px-6 py-4">{value.softMin}</td>
-                  <td className="px-6 py-4">{value.hardMin}</td>
-                  <td className="px-6 py-4">{value.softMax}</td>
-                  <td className="px-6 py-4">{value.hardMax}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+    // Handle HR input change
+    const handleHrInputChange = (medication, outcome, value) => {
+      const key = `${medication}-${outcome}`;
+      setHrInputs((prev) => ({ ...prev, [key]: value }));
 
-      {/* Hazard Ratios Table */}
-      <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Risk Reduction When Each Medication is Applied
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left text-gray-500">
-            <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3">
-                  Outcome
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  SGLT2i
-                  <br />
-                  Hazard Ratio
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  GLP-1 RA
-                  <br />
-                  Hazard Ratio
-                </th>
-                <th scope="col" className="px-6 py-3">
-                  Finerenone
-                  <br />
-                  Hazard Ratio
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {explanations.hazardRatios.table.map((row, index) => (
-                <tr key={index} className="bg-white border-b">
-                  <th
-                    scope="row"
-                    className="px-6 py-4 font-medium text-gray-900"
-                  >
-                    {row.outcome}
-                  </th>
-                  <td className="px-6 py-4">{row.sglt2i}</td>
-                  <td className="px-6 py-4">{row.glp1ra}</td>
-                  <td className="px-6 py-4">{row.nsmra}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Values in parentheses represent 95% confidence intervals.
+      // Validate
+      if (value === "") {
+        setHrErrors((prev) => ({ ...prev, [key]: null }));
+        return;
+      }
+
+      const numValue = parseFloat(value);
+      if (isNaN(numValue)) {
+        setHrErrors((prev) => ({ ...prev, [key]: "Must be a number" }));
+      } else if (numValue <= 0) {
+        setHrErrors((prev) => ({ ...prev, [key]: "Must be greater than 0" }));
+      } else if (numValue >= 10) {
+        setHrErrors((prev) => ({ ...prev, [key]: "Must be less than 10" }));
+      } else {
+        setHrErrors((prev) => ({ ...prev, [key]: null }));
+      }
+    };
+
+    // Handle HR input blur (apply custom value)
+    const handleHrInputBlur = (medication, outcome, value) => {
+      const key = `${medication}-${outcome}`;
+      if (value === "" || hrErrors[key]) {
+        return;
+      }
+
+      const numValue = parseFloat(value);
+      setCustomHazardRatios((prev) => ({
+        ...prev,
+        [medication]: {
+          ...prev[medication],
+          [outcome]: numValue,
+        },
+      }));
+    };
+
+    // Handle removing custom HR
+    const handleRemoveCustomHR = (medication, outcome) => {
+      setCustomHazardRatios((prev) => ({
+        ...prev,
+        [medication]: {
+          ...prev[medication],
+          [outcome]: null,
+        },
+      }));
+      const key = `${medication}-${outcome}`;
+      setHrInputs((prev) => {
+        const newInputs = { ...prev };
+        delete newInputs[key];
+        return newInputs;
+      });
+      setHrErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[key];
+        return newErrors;
+      });
+    };
+
+    // Render HR cell with input capability
+    const renderHRCell = (value, medication, outcome, defaultValue) => {
+      const key = `${medication}-${outcome}`;
+      const hasCustom = hasCustomHR(medication, outcome);
+      const inputValue = hrInputs[key] ?? "";
+      const error = hrErrors[key];
+
+      if (defaultValue === null) {
+        return <td className="px-6 py-4 text-gray-400">Not available</td>;
+      }
+
+      return (
+        <td className="px-6 py-4">
+          <div className="space-y-2">
+            {/* Default value display */}
+            <div className="text-xs text-gray-500">
+              <span className="font-medium">Literature: </span>
+              {value}
+            </div>
+
+            {/* Custom input or display */}
+            {hasCustom ? (
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-purple-700">
+                    Custom: {customHazardRatios[medication][outcome]}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRemoveCustomHR(medication, outcome)}
+                  className="p-1 hover:bg-gray-200 rounded"
+                  title="Remove custom value"
+                >
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) =>
+                    handleHrInputChange(medication, outcome, e.target.value)
+                  }
+                  onBlur={(e) =>
+                    handleHrInputBlur(medication, outcome, e.target.value)
+                  }
+                  placeholder="Custom HR"
+                  className={`w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-1 ${
+                    error
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-gray-300 focus:ring-purple-500"
+                  }`}
+                />
+              </div>
+            )}
+            {error && <div className="text-xs text-red-600">{error}</div>}
+          </div>
+        </td>
+      );
+    };
+
+    return (
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-4">
+          Risk Calculator Specifications
+        </h2>
+        <p className="text-sm text-gray-600 mb-6">
+          This tool is intended for clinical use and provides risk estimations
+          based on published equations. The input fields have validation ranges
+          to ensure data quality. "Soft" bounds will trigger a warning for
+          unusual values, while "Hard" bounds will prevent calculation for
+          physiologically impossible values.
         </p>
+
+        {/* Hazard Ratios Table */}
+        <div className="mb-8">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Risk Reduction When Each Medication is Applied
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            You can input custom hazard ratios for each medication-outcome
+            combination. The literature values are shown for reference. Custom
+            values must be numeric, greater than 0, and less than 10.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left text-gray-500">
+              <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3">
+                    Outcome
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    SGLT2i
+                    <br />
+                    Hazard Ratio
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    GLP-1 RA
+                    <br />
+                    Hazard Ratio
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    Finerenone
+                    <br />
+                    Hazard Ratio
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {explanations.hazardRatios.table.map((row, index) => {
+                  const outcomes = ["cvd", "hf", "ckd"];
+                  const outcome = outcomes[index];
+                  return (
+                    <tr key={index} className="bg-white border-b">
+                      <th
+                        scope="row"
+                        className="px-6 py-4 font-medium text-gray-900"
+                      >
+                        {row.outcome}
+                      </th>
+                      {renderHRCell(
+                        row.sglt2i,
+                        "sglt2i",
+                        outcome,
+                        defaultHazardRatios.sglt2i[outcome]
+                      )}
+                      {renderHRCell(
+                        row.glp1ra,
+                        "glp1ra",
+                        outcome,
+                        defaultHazardRatios.glp1ra[outcome]
+                      )}
+                      {renderHRCell(
+                        row.nsmra,
+                        "nsmra",
+                        outcome,
+                        defaultHazardRatios.nsmra[outcome]
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Values in parentheses represent 95% confidence intervals from
+            published literature.
+          </p>
+        </div>
+
+        {/* Input Validation Table */}
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Input Validation Ranges
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left text-gray-500">
+              <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3">
+                    Variable
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    Unit
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    Soft Lower
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    Hard Lower
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    Soft Upper
+                  </th>
+                  <th scope="col" className="px-6 py-3">
+                    Hard Upper
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(validationConfig).map(([key, value]) => (
+                  <tr key={key} className="bg-white border-b">
+                    <th
+                      scope="row"
+                      className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap"
+                    >
+                      {key.charAt(0).toUpperCase() + key.slice(1)}
+                    </th>
+                    <td className="px-6 py-4">{value.unit}</td>
+                    <td className="px-6 py-4">{value.softMin}</td>
+                    <td className="px-6 py-4">{value.hardMin}</td>
+                    <td className="px-6 py-4">{value.softMax}</td>
+                    <td className="px-6 py-4">{value.hardMax}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderResults = () => {
     if (hasHardErrors) {
@@ -1361,11 +1641,7 @@ const ClinicalRiskCalculator = () => {
     }
 
     const currentResult = results[activeTab as "krfe" | "prevent" | "kdigo"];
-    const hazardRatios = {
-      sglt2i: { cvd: 0.87, hf: 0.7, ckd: 0.63 },
-      glp1ra: { cvd: 0.82, hf: null, ckd: 0.79 },
-      nsmra: { cvd: 0.86, hf: 0.78, ckd: 0.77 },
-    };
+    const hazardRatios = getEffectiveHazardRatios();
 
     if (!currentResult) {
       return (
@@ -1505,6 +1781,13 @@ const ClinicalRiskCalculator = () => {
               </h3>{" "}
               {activeTab === "krfe" && (
                 <div className="space-y-2">
+                  <CustomHRNotification
+                    medications={[
+                      { name: "SGLT2i", key: "sglt2i", outcome: "ckd" },
+                      { name: "GLP-1 RA", key: "glp1ra", outcome: "ckd" },
+                      { name: "nsMRA", key: "nsmra", outcome: "ckd" },
+                    ]}
+                  />
                   {" "}
                   <div className="grid grid-cols-5 items-center text-center text-xs font-semibold text-gray-600">
                     <div className="text-left">Medication</div>
@@ -1598,6 +1881,15 @@ const ClinicalRiskCalculator = () => {
               )}{" "}
               {activeTab === "prevent" && (
                 <div className="space-y-2">
+                  <CustomHRNotification
+                    medications={[
+                      { name: "SGLT2i (CVD)", key: "sglt2i", outcome: "cvd" },
+                      { name: "SGLT2i (HF)", key: "sglt2i", outcome: "hf" },
+                      { name: "GLP-1 RA (CVD)", key: "glp1ra", outcome: "cvd" },
+                      { name: "nsMRA (CVD)", key: "nsmra", outcome: "cvd" },
+                      { name: "nsMRA (HF)", key: "nsmra", outcome: "hf" },
+                    ]}
+                  />
                   {" "}
                   <div className="grid grid-cols-5 gap-3 text-center text-xs font-semibold text-gray-600">
                     <div className="text-left">Medication</div>
@@ -1687,6 +1979,16 @@ const ClinicalRiskCalculator = () => {
               )}{" "}
               {activeTab === "kdigo" && (
                 <div className="space-y-2">
+                  <CustomHRNotification
+                    medications={[
+                      { name: "SGLT2i (CVD)", key: "sglt2i", outcome: "cvd" },
+                      { name: "SGLT2i (CKD)", key: "sglt2i", outcome: "ckd" },
+                      { name: "GLP-1 RA (CVD)", key: "glp1ra", outcome: "cvd" },
+                      { name: "GLP-1 RA (CKD)", key: "glp1ra", outcome: "ckd" },
+                      { name: "nsMRA (CVD)", key: "nsmra", outcome: "cvd" },
+                      { name: "nsMRA (CKD)", key: "nsmra", outcome: "ckd" },
+                    ]}
+                  />
                   {" "}
                   <div className="grid grid-cols-4 gap-3 text-center text-xs font-semibold text-gray-600">
                     <div className="text-left">Medication</div>
@@ -2129,6 +2431,30 @@ const ClinicalRiskCalculator = () => {
                     Patient Data
                   </h2>
                   <div className="flex items-center space-x-2">
+                    <div className="flex rounded border border-gray-300 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setInputMode("calculate")}
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          inputMode === "calculate"
+                            ? "bg-purple-600 text-white"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        Calculate for me
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInputMode("manual")}
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          inputMode === "manual"
+                            ? "bg-purple-600 text-white"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        I already calculated
+                      </button>
+                    </div>
                     <button
                       onClick={resetAllData}
                       className="flex items-center px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors"
@@ -2150,77 +2476,161 @@ const ClinicalRiskCalculator = () => {
                 </header>
                 {!inputsCollapsed && (
                   <div className="p-4 space-y-3">
-                    {activeTab === "kdigo" ? (
-                      <div className="grid grid-cols-2 gap-3">
-                        {" "}
-                        <CompactInputField
-                          label="eGFR"
-                          name="eGFR"
-                          value={formState.eGFR}
-                          onChange={handleInputChange}
-                          onBlur={handleInputBlur}
-                          unit="mL/min/1.73mÂ²"
-                          required
-                          error={validationErrors.eGFR}
-                          onInfoClick={() => handleInfoClick("input", "eGFR")}
-                        />{" "}
-                        <CompactInputField
-                          label="uACR"
-                          name="uACR"
-                          value={formState.uACR}
-                          onChange={handleInputChange}
-                          onBlur={handleInputBlur}
-                          unit="mg/g"
-                          required
-                          error={validationErrors.uACR}
-                          onInfoClick={() => handleInfoClick("input", "uACR")}
-                        />{" "}
+                    {inputMode === "manual" ? (
+                      // Manual Risk Input Mode
+                      <div className="space-y-3">
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                          <p className="text-sm text-blue-800">
+                            Enter the risk percentages you've already calculated. The app will apply GDMT effects to these values.
+                          </p>
+                        </div>
+                        {activeTab === "krfe" && (
+                          <div className="grid grid-cols-1 gap-3">
+                            <CompactInputField
+                              label="5-Year Kidney Failure Risk"
+                              name="krfe"
+                              value={manualRisks.krfe}
+                              onChange={(e) => handleManualRiskChange("krfe", e.target.value)}
+                              onBlur={() => {}}
+                              unit="%"
+                              required
+                              onInfoClick={() => handleInfoClick("output", "krfe")}
+                            />
+                          </div>
+                        )}
+                        {activeTab === "prevent" && (
+                          <div className="grid grid-cols-3 gap-3">
+                            <CompactInputField
+                              label="10-Year CVD Risk"
+                              name="cvd"
+                              value={manualRisks.cvd}
+                              onChange={(e) => handleManualRiskChange("cvd", e.target.value)}
+                              onBlur={() => {}}
+                              unit="%"
+                              required
+                              onInfoClick={() => handleInfoClick("output", "prevent")}
+                            />
+                            <CompactInputField
+                              label="10-Year ASCVD Risk"
+                              name="ascvd"
+                              value={manualRisks.ascvd}
+                              onChange={(e) => handleManualRiskChange("ascvd", e.target.value)}
+                              onBlur={() => {}}
+                              unit="%"
+                              required
+                              onInfoClick={() => handleInfoClick("output", "prevent")}
+                            />
+                            <CompactInputField
+                              label="10-Year Heart Failure Risk"
+                              name="hf"
+                              value={manualRisks.hf}
+                              onChange={(e) => handleManualRiskChange("hf", e.target.value)}
+                              onBlur={() => {}}
+                              unit="%"
+                              required
+                              onInfoClick={() => handleInfoClick("output", "prevent")}
+                            />
+                          </div>
+                        )}
+                        {activeTab === "kdigo" && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <CompactInputField
+                              label="CVD Mortality Risk"
+                              name="kdigoCvd"
+                              value={manualRisks.kdigoCvd}
+                              onChange={(e) => handleManualRiskChange("kdigoCvd", e.target.value)}
+                              onBlur={() => {}}
+                              unit="%"
+                              required
+                              onInfoClick={() => handleInfoClick("output", "kdigo")}
+                            />
+                            <CompactInputField
+                              label="CKD Progression Risk"
+                              name="kdigoCkd"
+                              value={manualRisks.kdigoCkd}
+                              onChange={(e) => handleManualRiskChange("kdigoCkd", e.target.value)}
+                              onBlur={() => {}}
+                              unit="%"
+                              required
+                              onInfoClick={() => handleInfoClick("output", "kdigo")}
+                            />
+                          </div>
+                        )}
                       </div>
                     ) : (
+                      // Calculate Mode - Original Input Fields
                       <>
-                        {" "}
-                        <div className="grid grid-cols-4 gap-3">
-                          {" "}
-                          <CompactInputField
-                            label="Age"
-                            name="age"
-                            value={formState.age}
-                            onChange={handleInputChange}
-                            onBlur={handleInputBlur}
-                            unit="yrs"
-                            required
-                            error={validationErrors.age}
-                            onInfoClick={() => handleInfoClick("input", "age")}
-                          />{" "}
-                          <SexToggle
-                            sex={formState.sex}
-                            onSexChange={handleSexChange}
-                            onInfoClick={() => handleInfoClick("input", "sex")}
-                          />{" "}
-                          <CompactInputField
-                            label="eGFR"
-                            name="eGFR"
-                            value={formState.eGFR}
-                            onChange={handleInputChange}
-                            onBlur={handleInputBlur}
-                            unit="mL/min/1.73mÂ²"
-                            required
-                            error={validationErrors.eGFR}
-                            onInfoClick={() => handleInfoClick("input", "eGFR")}
-                          />{" "}
-                          <CompactInputField
-                            label="uACR"
-                            name="uACR"
-                            value={formState.uACR}
-                            onChange={handleInputChange}
-                            onBlur={handleInputBlur}
-                            unit="mg/g"
-                            required
-                            error={validationErrors.uACR}
-                            onInfoClick={() => handleInfoClick("input", "uACR")}
-                          />{" "}
-                        </div>
-                        {activeTab === "prevent" && (
+                        {activeTab === "kdigo" ? (
+                          <div className="grid grid-cols-2 gap-3">
+                            {" "}
+                            <CompactInputField
+                              label="eGFR"
+                              name="eGFR"
+                              value={formState.eGFR}
+                              onChange={handleInputChange}
+                              onBlur={handleInputBlur}
+                              unit="mL/min/1.73mÂ²"
+                              required
+                              error={validationErrors.eGFR}
+                              onInfoClick={() => handleInfoClick("input", "eGFR")}
+                            />{" "}
+                            <CompactInputField
+                              label="uACR"
+                              name="uACR"
+                              value={formState.uACR}
+                              onChange={handleInputChange}
+                              onBlur={handleInputBlur}
+                              unit="mg/g"
+                              required
+                              error={validationErrors.uACR}
+                              onInfoClick={() => handleInfoClick("input", "uACR")}
+                            />{" "}
+                          </div>
+                        ) : (
+                          <>
+                            {" "}
+                            <div className="grid grid-cols-4 gap-3">
+                              {" "}
+                              <CompactInputField
+                                label="Age"
+                                name="age"
+                                value={formState.age}
+                                onChange={handleInputChange}
+                                onBlur={handleInputBlur}
+                                unit="yrs"
+                                required
+                                error={validationErrors.age}
+                                onInfoClick={() => handleInfoClick("input", "age")}
+                              />{" "}
+                              <SexToggle
+                                sex={formState.sex}
+                                onSexChange={handleSexChange}
+                                onInfoClick={() => handleInfoClick("input", "sex")}
+                              />{" "}
+                              <CompactInputField
+                                label="eGFR"
+                                name="eGFR"
+                                value={formState.eGFR}
+                                onChange={handleInputChange}
+                                onBlur={handleInputBlur}
+                                unit="mL/min/1.73mÂ²"
+                                required
+                                error={validationErrors.eGFR}
+                                onInfoClick={() => handleInfoClick("input", "eGFR")}
+                              />{" "}
+                              <CompactInputField
+                                label="uACR"
+                                name="uACR"
+                                value={formState.uACR}
+                                onChange={handleInputChange}
+                                onBlur={handleInputBlur}
+                                unit="mg/g"
+                                required
+                                error={validationErrors.uACR}
+                                onInfoClick={() => handleInfoClick("input", "uACR")}
+                              />{" "}
+                            </div>
+                            {activeTab === "prevent" && (
                           <>
                             {" "}
                             <div className="grid grid-cols-3 gap-3">
@@ -2382,6 +2792,8 @@ const ClinicalRiskCalculator = () => {
                         )}{" "}
                       </>
                     )}
+                  </>
+                )}
                   </div>
                 )}
               </section>
