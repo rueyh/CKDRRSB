@@ -235,14 +235,31 @@ const WaffleChart = memo(
     baseValue,
     treatedValue,
     colors,
+    total = 100,
   }: {
     baseValue: number;
     treatedValue: number;
     colors: { base: string; treated: string; bg: string };
+    total?: number;
   }) => {
-    const total = 100;
-    const baseCount = Math.round(baseValue);
-    const treatedCount = Math.round(treatedValue);
+    const baseCount = Math.round((baseValue / 100) * total);
+    const treatedCount = Math.round((treatedValue / 100) * total);
+
+    // Determine grid layout and square size based on total
+    let gridCols, gridSize, squareSize;
+    if (total === 100) {
+      gridCols = 10;
+      gridSize = "w-40 h-40";
+      squareSize = "rounded-[2px]";
+    } else if (total === 1000) {
+      gridCols = 32;
+      gridSize = "w-96 h-96";
+      squareSize = "rounded-[1px]";
+    } else if (total === 10000) {
+      gridCols = 100;
+      gridSize = "w-[32rem] h-[32rem]";
+      squareSize = "rounded-[0.5px]";
+    }
 
     const squares = Array.from({ length: total }, (_, i) => {
       let colorClass = colors.bg;
@@ -252,12 +269,15 @@ const WaffleChart = memo(
         colorClass = colors.base;
       }
       return (
-        <div key={i} className={`w-full h-full rounded-[2px] ${colorClass}`} />
+        <div key={i} className={`w-full h-full ${squareSize} ${colorClass}`} />
       );
     });
 
     return (
-      <div className="grid grid-cols-10 gap-1 w-32 h-32 p-1 border rounded-md bg-gray-50 shrink-0">
+      <div
+        className={`grid gap-[1px] ${gridSize} p-1 border rounded-md bg-gray-50 shrink-0`}
+        style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
+      >
         {squares}
       </div>
     );
@@ -491,9 +511,13 @@ const ClinicalRiskCalculator = () => {
     "clinician"
   );
   const [applyGdmt, setApplyGdmt] = useState(false);
-  const [inputMode, setInputMode] = useState<"calculate" | "manual">("calculate");
+  const [waffleScale, setWaffleScale] = useState<100 | 1000 | 10000>(100);
+  const [inputMode, setInputMode] = useState<"calculate" | "manual">(
+    "calculate"
+  );
   const [manualRisks, setManualRisks] = useState({
-    krfe: "",
+    krfe2Year: "",
+    krfe5Year: "",
     cvd: "",
     ascvd: "",
     hf: "",
@@ -768,7 +792,8 @@ const ClinicalRiskCalculator = () => {
     setValidationErrors({});
     setInputMode("calculate");
     setManualRisks({
-      krfe: "",
+      krfe2Year: "",
+      krfe5Year: "",
       cvd: "",
       ascvd: "",
       hf: "",
@@ -1034,7 +1059,8 @@ const ClinicalRiskCalculator = () => {
       };
 
       // Use manual risk inputs
-      const krfeValue = parseRisk(manualRisks.krfe);
+      const krfe2YearValue = parseRisk(manualRisks.krfe2Year);
+      const krfe5YearValue = parseRisk(manualRisks.krfe5Year);
       const cvdValue = parseRisk(manualRisks.cvd);
       const ascvdValue = parseRisk(manualRisks.ascvd);
       const hfValue = parseRisk(manualRisks.hf);
@@ -1042,22 +1068,44 @@ const ClinicalRiskCalculator = () => {
       const kdigoCkdValue = parseRisk(manualRisks.kdigoCkd);
 
       return {
-        krfe: krfeValue !== null ? { 
-          twoYear: krfeValue, 
-          fiveYear: krfeValue, 
-          riskLevel: krfeValue > 40 ? "High" : krfeValue > 10 ? "Moderate" : "Low" 
-        } : null,
-        prevent: (cvdValue !== null || ascvdValue !== null || hfValue !== null) ? {
-          cvd: cvdValue !== null ? cvdValue : 0,
-          ascvd: ascvdValue !== null ? ascvdValue : 0,
-          heartFailure: hfValue !== null ? hfValue : 0,
-        } : null,
-        kdigo: (kdigoCvdValue !== null || kdigoCkdValue !== null) ? {
-          cvdMortality: kdigoCvdValue !== null ? kdigoCvdValue : 0,
-          ckdProgression: kdigoCkdValue !== null ? kdigoCkdValue : 0,
-          egfrCategory: "Unknown",
-          acrCategory: "Unknown",
-        } : null,
+        krfe:
+          krfe2YearValue !== null || krfe5YearValue !== null
+            ? {
+                twoYear: krfe2YearValue !== null ? krfe2YearValue : 0,
+                fiveYear: krfe5YearValue !== null ? krfe5YearValue : 0,
+                riskLevel:
+                  krfe5YearValue !== null
+                    ? krfe5YearValue > 40
+                      ? "High"
+                      : krfe5YearValue > 10
+                      ? "Moderate"
+                      : "Low"
+                    : krfe2YearValue !== null
+                    ? krfe2YearValue > 40
+                      ? "High"
+                      : krfe2YearValue > 10
+                      ? "Moderate"
+                      : "Low"
+                    : "Low",
+              }
+            : null,
+        prevent:
+          cvdValue !== null || ascvdValue !== null || hfValue !== null
+            ? {
+                cvd: cvdValue !== null ? cvdValue : 0,
+                ascvd: ascvdValue !== null ? ascvdValue : 0,
+                heartFailure: hfValue !== null ? hfValue : 0,
+              }
+            : null,
+        kdigo:
+          kdigoCvdValue !== null || kdigoCkdValue !== null
+            ? {
+                cvdMortality: kdigoCvdValue !== null ? kdigoCvdValue : 0,
+                ckdProgression: kdigoCkdValue !== null ? kdigoCkdValue : 0,
+                egfrCategory: "Unknown",
+                acrCategory: "Unknown",
+              }
+            : null,
       };
     } else {
       // Calculate from inputs
@@ -1067,7 +1115,14 @@ const ClinicalRiskCalculator = () => {
         kdigo: calculateKDIGO(calculationState),
       };
     }
-  }, [inputMode, manualRisks, calculationState, calculateKFRE, calculatePREVENT, calculateKDIGO]);
+  }, [
+    inputMode,
+    manualRisks,
+    calculationState,
+    calculateKFRE,
+    calculatePREVENT,
+    calculateKDIGO,
+  ]);
 
   const hasHardErrors = useMemo(() => {
     return Object.values(validationErrors).some((e) => e?.severity === "hard");
@@ -1787,8 +1842,7 @@ const ClinicalRiskCalculator = () => {
                       { name: "GLP-1 RA", key: "glp1ra", outcome: "ckd" },
                       { name: "nsMRA", key: "nsmra", outcome: "ckd" },
                     ]}
-                  />
-                  {" "}
+                  />{" "}
                   <div className="grid grid-cols-5 items-center text-center text-xs font-semibold text-gray-600">
                     <div className="text-left">Medication</div>
                     <div>2-Year Risk</div>
@@ -1889,8 +1943,7 @@ const ClinicalRiskCalculator = () => {
                       { name: "nsMRA (CVD)", key: "nsmra", outcome: "cvd" },
                       { name: "nsMRA (HF)", key: "nsmra", outcome: "hf" },
                     ]}
-                  />
-                  {" "}
+                  />{" "}
                   <div className="grid grid-cols-5 gap-3 text-center text-xs font-semibold text-gray-600">
                     <div className="text-left">Medication</div>
                     <div>CVD</div>
@@ -1988,8 +2041,7 @@ const ClinicalRiskCalculator = () => {
                       { name: "nsMRA (CVD)", key: "nsmra", outcome: "cvd" },
                       { name: "nsMRA (CKD)", key: "nsmra", outcome: "ckd" },
                     ]}
-                  />
-                  {" "}
+                  />{" "}
                   <div className="grid grid-cols-4 gap-3 text-center text-xs font-semibold text-gray-600">
                     <div className="text-left">Medication</div>
                     <div>CVD Mortality</div>
@@ -2099,6 +2151,41 @@ const ClinicalRiskCalculator = () => {
         return (
           <div className="space-y-6">
             {" "}
+            {/* Scale Toggle */}
+            <div className="flex justify-center mb-4">
+              <div className="inline-flex rounded-lg border border-gray-300 p-1 bg-white">
+                <button
+                  onClick={() => setWaffleScale(100)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 100
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 100
+                </button>
+                <button
+                  onClick={() => setWaffleScale(1000)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 1000
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 1,000
+                </button>
+                <button
+                  onClick={() => setWaffleScale(10000)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 10000
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 10,000
+                </button>
+              </div>
+            </div>
             <div>
               {" "}
               <h4 className="font-semibold text-blue-800 mb-2">
@@ -2106,9 +2193,12 @@ const ClinicalRiskCalculator = () => {
               </h4>{" "}
               <p className="text-sm text-gray-700 mb-3">
                 {" "}
-                Out of 100 people with your health profile, about{" "}
-                <strong>{baseRisk.toFixed(0)}</strong> may need dialysis or a
-                kidney transplant in the next 5 years.{" "}
+                Out of {waffleScale.toLocaleString()} people with your health
+                profile, about{" "}
+                <strong>
+                  {Math.round((baseRisk / 100) * waffleScale).toLocaleString()}
+                </strong>{" "}
+                may need dialysis or a kidney transplant in the next 5 years.{" "}
               </p>{" "}
               <div className="flex justify-center p-4 bg-gray-50 rounded-lg">
                 {" "}
@@ -2116,6 +2206,7 @@ const ClinicalRiskCalculator = () => {
                   baseValue={baseRisk}
                   treatedValue={0}
                   colors={waffleColors.krfe}
+                  total={waffleScale}
                 />{" "}
               </div>{" "}
             </div>{" "}
@@ -2138,14 +2229,25 @@ const ClinicalRiskCalculator = () => {
                       </h5>{" "}
                       <p className="text-sm text-gray-700">
                         This medication could lower the number of people
-                        affected from {baseRisk.toFixed(0)} to about{" "}
-                        <strong>{med.risk.toFixed(0)} in 100 people</strong>.
+                        affected from{" "}
+                        {Math.round(
+                          (baseRisk / 100) * waffleScale
+                        ).toLocaleString()}{" "}
+                        to about{" "}
+                        <strong>
+                          {Math.round(
+                            (med.risk / 100) * waffleScale
+                          ).toLocaleString()}{" "}
+                          in {waffleScale.toLocaleString()} people
+                        </strong>
+                        .
                       </p>{" "}
                     </div>{" "}
                     <WaffleChart
                       baseValue={baseRisk}
                       treatedValue={med.risk}
                       colors={waffleColors.krfe}
+                      total={waffleScale}
                     />{" "}
                   </div>
                 ))}{" "}
@@ -2183,6 +2285,41 @@ const ClinicalRiskCalculator = () => {
 
         return (
           <div className="space-y-6">
+            {/* Scale Toggle */}
+            <div className="flex justify-center mb-4">
+              <div className="inline-flex rounded-lg border border-gray-300 p-1 bg-white">
+                <button
+                  onClick={() => setWaffleScale(100)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 100
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 100
+                </button>
+                <button
+                  onClick={() => setWaffleScale(1000)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 1000
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 1,000
+                </button>
+                <button
+                  onClick={() => setWaffleScale(10000)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 10000
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 10,000
+                </button>
+              </div>
+            </div>
             {risks.map((riskItem) => {
               const baseRisk =
                 currentResult[riskItem.key as keyof typeof currentResult];
@@ -2192,9 +2329,13 @@ const ClinicalRiskCalculator = () => {
                     {riskItem.title} Risk (10-Year)
                   </h4>
                   <p className="text-sm text-gray-700 mb-3">
-                    Out of 100 people like you, about{" "}
-                    <strong>{baseRisk.toFixed(0)}</strong> may develop this in
-                    10 years.
+                    Out of {waffleScale.toLocaleString()} people like you, about{" "}
+                    <strong>
+                      {Math.round(
+                        (baseRisk / 100) * waffleScale
+                      ).toLocaleString()}
+                    </strong>{" "}
+                    may develop this in 10 years.
                   </p>
                   <div className="flex justify-center mb-3">
                     <WaffleChart
@@ -2205,6 +2346,7 @@ const ClinicalRiskCalculator = () => {
                           riskItem.colorKey as keyof typeof waffleColors
                         ]
                       }
+                      total={waffleScale}
                     />
                   </div>
                   {applyGdmt && (
@@ -2234,9 +2376,15 @@ const ClinicalRiskCalculator = () => {
                                 </h5>
                                 <p className="text-sm text-gray-700">
                                   Could lower the number from{" "}
-                                  {baseRisk.toFixed(0)} to{" "}
+                                  {Math.round(
+                                    (baseRisk / 100) * waffleScale
+                                  ).toLocaleString()}{" "}
+                                  to{" "}
                                   <strong>
-                                    {treatedRisk.toFixed(0)} in 100 people
+                                    {Math.round(
+                                      (treatedRisk / 100) * waffleScale
+                                    ).toLocaleString()}{" "}
+                                    in {waffleScale.toLocaleString()} people
                                   </strong>
                                   .
                                 </p>
@@ -2249,6 +2397,7 @@ const ClinicalRiskCalculator = () => {
                                     riskItem.colorKey as keyof typeof waffleColors
                                   ]
                                 }
+                                total={waffleScale}
                               />
                             </div>
                           );
@@ -2284,6 +2433,41 @@ const ClinicalRiskCalculator = () => {
 
         return (
           <div className="space-y-6">
+            {/* Scale Toggle */}
+            <div className="flex justify-center mb-4">
+              <div className="inline-flex rounded-lg border border-gray-300 p-1 bg-white">
+                <button
+                  onClick={() => setWaffleScale(100)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 100
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 100
+                </button>
+                <button
+                  onClick={() => setWaffleScale(1000)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 1000
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 1,000
+                </button>
+                <button
+                  onClick={() => setWaffleScale(10000)}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    waffleScale === 10000
+                      ? "bg-purple-600 text-white"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  Out of 10,000
+                </button>
+              </div>
+            </div>
             {risks.map((riskItem) => {
               const baseRisk = riskItem.value;
               return (
@@ -2293,8 +2477,13 @@ const ClinicalRiskCalculator = () => {
                   </h4>
                   <p className="text-sm text-gray-700 mb-3">
                     Each year, about{" "}
-                    <strong>{baseRisk.toFixed(0)} in 100 people</strong> like
-                    you may have this outcome.
+                    <strong>
+                      {Math.round(
+                        (baseRisk / 100) * waffleScale
+                      ).toLocaleString()}{" "}
+                      in {waffleScale.toLocaleString()} people
+                    </strong>{" "}
+                    like you may have this outcome.
                   </p>
                   <div className="flex justify-center mb-3">
                     <WaffleChart
@@ -2305,6 +2494,7 @@ const ClinicalRiskCalculator = () => {
                           riskItem.colorKey as keyof typeof waffleColors
                         ]
                       }
+                      total={waffleScale}
                     />
                   </div>
                   {applyGdmt && (
@@ -2327,9 +2517,15 @@ const ClinicalRiskCalculator = () => {
                               </h5>
                               <p className="text-sm text-gray-700">
                                 Could lower the number from{" "}
-                                {baseRisk.toFixed(0)} to{" "}
+                                {Math.round(
+                                  (baseRisk / 100) * waffleScale
+                                ).toLocaleString()}{" "}
+                                to{" "}
                                 <strong>
-                                  {treatedRisk.toFixed(0)} in 100 people
+                                  {Math.round(
+                                    (treatedRisk / 100) * waffleScale
+                                  ).toLocaleString()}{" "}
+                                  in {waffleScale.toLocaleString()} people
                                 </strong>
                                 .
                               </p>
@@ -2342,6 +2538,7 @@ const ClinicalRiskCalculator = () => {
                                   riskItem.colorKey as keyof typeof waffleColors
                                 ]
                               }
+                              total={waffleScale}
                             />
                           </div>
                         );
@@ -2365,8 +2562,7 @@ const ClinicalRiskCalculator = () => {
           {" "}
           <h1 className="text-2xl font-bold text-gray-900 mb-2 flex items-center justify-center">
             {" "}
-            <Calculator className="w-6 h-6 mr-3 text-purple-600" /> Kidney
-            RiskMate{" "}
+            <Calculator className="w-6 h-6 mr-3 text-purple-600" /> TreatCKD{" "}
           </h1>{" "}
         </header>
         <nav className="flex justify-center mb-4 space-x-3">
@@ -2481,20 +2677,44 @@ const ClinicalRiskCalculator = () => {
                       <div className="space-y-3">
                         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
                           <p className="text-sm text-blue-800">
-                            Enter the risk percentages you've already calculated. The app will apply GDMT effects to these values.
+                            Enter the risk percentages you've already
+                            calculated. The app will apply GDMT effects to these
+                            values.
                           </p>
                         </div>
                         {activeTab === "krfe" && (
-                          <div className="grid grid-cols-1 gap-3">
+                          <div className="grid grid-cols-2 gap-3">
                             <CompactInputField
-                              label="5-Year Kidney Failure Risk"
-                              name="krfe"
-                              value={manualRisks.krfe}
-                              onChange={(e) => handleManualRiskChange("krfe", e.target.value)}
+                              label="2-Year Kidney Failure Risk"
+                              name="krfe2Year"
+                              value={manualRisks.krfe2Year}
+                              onChange={(e) =>
+                                handleManualRiskChange(
+                                  "krfe2Year",
+                                  e.target.value
+                                )
+                              }
                               onBlur={() => {}}
                               unit="%"
-                              required
-                              onInfoClick={() => handleInfoClick("output", "krfe")}
+                              onInfoClick={() =>
+                                handleInfoClick("output", "krfe")
+                              }
+                            />
+                            <CompactInputField
+                              label="5-Year Kidney Failure Risk"
+                              name="krfe5Year"
+                              value={manualRisks.krfe5Year}
+                              onChange={(e) =>
+                                handleManualRiskChange(
+                                  "krfe5Year",
+                                  e.target.value
+                                )
+                              }
+                              onBlur={() => {}}
+                              unit="%"
+                              onInfoClick={() =>
+                                handleInfoClick("output", "krfe")
+                              }
                             />
                           </div>
                         )}
@@ -2504,31 +2724,43 @@ const ClinicalRiskCalculator = () => {
                               label="10-Year CVD Risk"
                               name="cvd"
                               value={manualRisks.cvd}
-                              onChange={(e) => handleManualRiskChange("cvd", e.target.value)}
+                              onChange={(e) =>
+                                handleManualRiskChange("cvd", e.target.value)
+                              }
                               onBlur={() => {}}
                               unit="%"
                               required
-                              onInfoClick={() => handleInfoClick("output", "prevent")}
+                              onInfoClick={() =>
+                                handleInfoClick("output", "prevent")
+                              }
                             />
                             <CompactInputField
                               label="10-Year ASCVD Risk"
                               name="ascvd"
                               value={manualRisks.ascvd}
-                              onChange={(e) => handleManualRiskChange("ascvd", e.target.value)}
+                              onChange={(e) =>
+                                handleManualRiskChange("ascvd", e.target.value)
+                              }
                               onBlur={() => {}}
                               unit="%"
                               required
-                              onInfoClick={() => handleInfoClick("output", "prevent")}
+                              onInfoClick={() =>
+                                handleInfoClick("output", "prevent")
+                              }
                             />
                             <CompactInputField
                               label="10-Year Heart Failure Risk"
                               name="hf"
                               value={manualRisks.hf}
-                              onChange={(e) => handleManualRiskChange("hf", e.target.value)}
+                              onChange={(e) =>
+                                handleManualRiskChange("hf", e.target.value)
+                              }
                               onBlur={() => {}}
                               unit="%"
                               required
-                              onInfoClick={() => handleInfoClick("output", "prevent")}
+                              onInfoClick={() =>
+                                handleInfoClick("output", "prevent")
+                              }
                             />
                           </div>
                         )}
@@ -2538,21 +2770,35 @@ const ClinicalRiskCalculator = () => {
                               label="CVD Mortality Risk"
                               name="kdigoCvd"
                               value={manualRisks.kdigoCvd}
-                              onChange={(e) => handleManualRiskChange("kdigoCvd", e.target.value)}
+                              onChange={(e) =>
+                                handleManualRiskChange(
+                                  "kdigoCvd",
+                                  e.target.value
+                                )
+                              }
                               onBlur={() => {}}
                               unit="%"
                               required
-                              onInfoClick={() => handleInfoClick("output", "kdigo")}
+                              onInfoClick={() =>
+                                handleInfoClick("output", "kdigo")
+                              }
                             />
                             <CompactInputField
                               label="CKD Progression Risk"
                               name="kdigoCkd"
                               value={manualRisks.kdigoCkd}
-                              onChange={(e) => handleManualRiskChange("kdigoCkd", e.target.value)}
+                              onChange={(e) =>
+                                handleManualRiskChange(
+                                  "kdigoCkd",
+                                  e.target.value
+                                )
+                              }
                               onBlur={() => {}}
                               unit="%"
                               required
-                              onInfoClick={() => handleInfoClick("output", "kdigo")}
+                              onInfoClick={() =>
+                                handleInfoClick("output", "kdigo")
+                              }
                             />
                           </div>
                         )}
@@ -2572,7 +2818,9 @@ const ClinicalRiskCalculator = () => {
                               unit="mL/min/1.73mÂ²"
                               required
                               error={validationErrors.eGFR}
-                              onInfoClick={() => handleInfoClick("input", "eGFR")}
+                              onInfoClick={() =>
+                                handleInfoClick("input", "eGFR")
+                              }
                             />{" "}
                             <CompactInputField
                               label="uACR"
@@ -2583,7 +2831,9 @@ const ClinicalRiskCalculator = () => {
                               unit="mg/g"
                               required
                               error={validationErrors.uACR}
-                              onInfoClick={() => handleInfoClick("input", "uACR")}
+                              onInfoClick={() =>
+                                handleInfoClick("input", "uACR")
+                              }
                             />{" "}
                           </div>
                         ) : (
@@ -2600,12 +2850,16 @@ const ClinicalRiskCalculator = () => {
                                 unit="yrs"
                                 required
                                 error={validationErrors.age}
-                                onInfoClick={() => handleInfoClick("input", "age")}
+                                onInfoClick={() =>
+                                  handleInfoClick("input", "age")
+                                }
                               />{" "}
                               <SexToggle
                                 sex={formState.sex}
                                 onSexChange={handleSexChange}
-                                onInfoClick={() => handleInfoClick("input", "sex")}
+                                onInfoClick={() =>
+                                  handleInfoClick("input", "sex")
+                                }
                               />{" "}
                               <CompactInputField
                                 label="eGFR"
@@ -2616,7 +2870,9 @@ const ClinicalRiskCalculator = () => {
                                 unit="mL/min/1.73mÂ²"
                                 required
                                 error={validationErrors.eGFR}
-                                onInfoClick={() => handleInfoClick("input", "eGFR")}
+                                onInfoClick={() =>
+                                  handleInfoClick("input", "eGFR")
+                                }
                               />{" "}
                               <CompactInputField
                                 label="uACR"
@@ -2627,173 +2883,181 @@ const ClinicalRiskCalculator = () => {
                                 unit="mg/g"
                                 required
                                 error={validationErrors.uACR}
-                                onInfoClick={() => handleInfoClick("input", "uACR")}
+                                onInfoClick={() =>
+                                  handleInfoClick("input", "uACR")
+                                }
                               />{" "}
                             </div>
                             {activeTab === "prevent" && (
-                          <>
-                            {" "}
-                            <div className="grid grid-cols-3 gap-3">
-                              {" "}
-                              <CompactInputField
-                                label="SBP"
-                                name="sbp"
-                                value={formState.sbp}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mmHg"
-                                required
-                                error={validationErrors.sbp}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "sbp")
-                                }
-                              />{" "}
-                              <CompactInputField
-                                label="Total Chol"
-                                name="totalCholesterol"
-                                value={formState.totalCholesterol}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mg/dL"
-                                required
-                                error={validationErrors.totalCholesterol}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "totalCholesterol")
-                                }
-                              />{" "}
-                              <CompactInputField
-                                label="HDL"
-                                name="hdlCholesterol"
-                                value={formState.hdlCholesterol}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mg/dL"
-                                required
-                                error={validationErrors.hdlCholesterol}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "hdlCholesterol")
-                                }
-                              />{" "}
-                            </div>{" "}
-                            <div className="grid grid-cols-1">
-                              {" "}
-                              <CompactInputField
-                                label="BMI"
-                                name="bmi"
-                                value={formState.bmi}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="kg/mÂ²"
-                                error={validationErrors.bmi}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "bmi")
-                                }
-                              />{" "}
-                            </div>{" "}
-                            <div className="grid grid-cols-4 gap-3">
-                              {" "}
-                              <ToggleButton
-                                label="Diabetes"
-                                name="diabetes"
-                                checked={formState.diabetes}
-                                onChange={handleToggleChange}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "diabetes")
-                                }
-                              />{" "}
-                              <ToggleButton
-                                label="Smoking"
-                                name="smoking"
-                                checked={formState.smoking}
-                                onChange={handleToggleChange}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "smoking")
-                                }
-                              />{" "}
-                              <ToggleButton
-                                label="HTN Meds"
-                                name="onAntihypertensive"
-                                checked={formState.onAntihypertensive}
-                                onChange={handleToggleChange}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "onAntihypertensive")
-                                }
-                              />{" "}
-                              <ToggleButton
-                                label="Statin"
-                                name="onStatin"
-                                checked={formState.onStatin}
-                                onChange={handleToggleChange}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "onStatin")
-                                }
-                              />{" "}
-                            </div>{" "}
+                              <>
+                                {" "}
+                                <div className="grid grid-cols-3 gap-3">
+                                  {" "}
+                                  <CompactInputField
+                                    label="SBP"
+                                    name="sbp"
+                                    value={formState.sbp}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="mmHg"
+                                    required
+                                    error={validationErrors.sbp}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "sbp")
+                                    }
+                                  />{" "}
+                                  <CompactInputField
+                                    label="Total Chol"
+                                    name="totalCholesterol"
+                                    value={formState.totalCholesterol}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="mg/dL"
+                                    required
+                                    error={validationErrors.totalCholesterol}
+                                    onInfoClick={() =>
+                                      handleInfoClick(
+                                        "input",
+                                        "totalCholesterol"
+                                      )
+                                    }
+                                  />{" "}
+                                  <CompactInputField
+                                    label="HDL"
+                                    name="hdlCholesterol"
+                                    value={formState.hdlCholesterol}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="mg/dL"
+                                    required
+                                    error={validationErrors.hdlCholesterol}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "hdlCholesterol")
+                                    }
+                                  />{" "}
+                                </div>{" "}
+                                <div className="grid grid-cols-1">
+                                  {" "}
+                                  <CompactInputField
+                                    label="BMI"
+                                    name="bmi"
+                                    value={formState.bmi}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="kg/mÂ²"
+                                    error={validationErrors.bmi}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "bmi")
+                                    }
+                                  />{" "}
+                                </div>{" "}
+                                <div className="grid grid-cols-4 gap-3">
+                                  {" "}
+                                  <ToggleButton
+                                    label="Diabetes"
+                                    name="diabetes"
+                                    checked={formState.diabetes}
+                                    onChange={handleToggleChange}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "diabetes")
+                                    }
+                                  />{" "}
+                                  <ToggleButton
+                                    label="Smoking"
+                                    name="smoking"
+                                    checked={formState.smoking}
+                                    onChange={handleToggleChange}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "smoking")
+                                    }
+                                  />{" "}
+                                  <ToggleButton
+                                    label="HTN Meds"
+                                    name="onAntihypertensive"
+                                    checked={formState.onAntihypertensive}
+                                    onChange={handleToggleChange}
+                                    onInfoClick={() =>
+                                      handleInfoClick(
+                                        "input",
+                                        "onAntihypertensive"
+                                      )
+                                    }
+                                  />{" "}
+                                  <ToggleButton
+                                    label="Statin"
+                                    name="onStatin"
+                                    checked={formState.onStatin}
+                                    onChange={handleToggleChange}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "onStatin")
+                                    }
+                                  />{" "}
+                                </div>{" "}
+                              </>
+                            )}
+                            {activeTab === "krfe" && (
+                              <div>
+                                {" "}
+                                <h3 className="text-sm font-semibold text-gray-800 my-2 border-t pt-2">
+                                  8-Variable KFRE (Optional)
+                                </h3>{" "}
+                                <div className="grid grid-cols-4 gap-3">
+                                  {" "}
+                                  <CompactInputField
+                                    label="Calcium"
+                                    name="calcium"
+                                    value={formState.calcium}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="mg/dL"
+                                    error={validationErrors.calcium}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "calcium")
+                                    }
+                                  />{" "}
+                                  <CompactInputField
+                                    label="Phosphate"
+                                    name="phosphate"
+                                    value={formState.phosphate}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="mg/dL"
+                                    error={validationErrors.phosphate}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "phosphate")
+                                    }
+                                  />{" "}
+                                  <CompactInputField
+                                    label="Albumin"
+                                    name="albumin"
+                                    value={formState.albumin}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="g/dL"
+                                    error={validationErrors.albumin}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "albumin")
+                                    }
+                                  />{" "}
+                                  <CompactInputField
+                                    label="Bicarbonate"
+                                    name="bicarbonate"
+                                    value={formState.bicarbonate}
+                                    onChange={handleInputChange}
+                                    onBlur={handleInputBlur}
+                                    unit="mEq/L"
+                                    error={validationErrors.bicarbonate}
+                                    onInfoClick={() =>
+                                      handleInfoClick("input", "bicarbonate")
+                                    }
+                                  />{" "}
+                                </div>{" "}
+                              </div>
+                            )}{" "}
                           </>
                         )}
-                        {activeTab === "krfe" && (
-                          <div>
-                            {" "}
-                            <h3 className="text-sm font-semibold text-gray-800 my-2 border-t pt-2">
-                              8-Variable KFRE (Optional)
-                            </h3>{" "}
-                            <div className="grid grid-cols-4 gap-3">
-                              {" "}
-                              <CompactInputField
-                                label="Calcium"
-                                name="calcium"
-                                value={formState.calcium}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mg/dL"
-                                error={validationErrors.calcium}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "calcium")
-                                }
-                              />{" "}
-                              <CompactInputField
-                                label="Phosphate"
-                                name="phosphate"
-                                value={formState.phosphate}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mg/dL"
-                                error={validationErrors.phosphate}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "phosphate")
-                                }
-                              />{" "}
-                              <CompactInputField
-                                label="Albumin"
-                                name="albumin"
-                                value={formState.albumin}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="g/dL"
-                                error={validationErrors.albumin}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "albumin")
-                                }
-                              />{" "}
-                              <CompactInputField
-                                label="Bicarbonate"
-                                name="bicarbonate"
-                                value={formState.bicarbonate}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mEq/L"
-                                error={validationErrors.bicarbonate}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "bicarbonate")
-                                }
-                              />{" "}
-                            </div>{" "}
-                          </div>
-                        )}{" "}
                       </>
                     )}
-                  </>
-                )}
                   </div>
                 )}
               </section>
