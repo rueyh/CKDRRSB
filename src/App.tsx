@@ -29,8 +29,9 @@ import {
 import explanations from "./explanations.json";
 // Import ZIP code to SDI decile lookup (ZCTA5 → SDI decile 1–10)
 import zipSdiDecile from "./zipSdiDecile.json";
-// PREVENT formula reference text (loaded on demand)
+// PREVENT and KFRE formula reference text (loaded on demand)
 import preventFormulasRaw from "./PREVENT_Formulas_Reference";
+import kfreFormulasRaw from "./KFRE_Formulas_Reference";
 
 // --- Configuration for Input Validation ---
 const validationConfig = {
@@ -797,10 +798,14 @@ const ClinicalRiskCalculator = () => {
         const content =
           key === "prevent"
             ? preventFormulasRaw
+            : key === "krfe"
+            ? kfreFormulasRaw
             : (explanations.formulas as any)[key] ?? "";
         const title =
           key === "prevent"
             ? "PREVENT Formula Reference"
+            : key === "krfe"
+            ? "KFRE Formula Reference"
             : `Formula Details for ${key.toUpperCase()}`;
         setShowInfoModal({
           show: true,
@@ -1024,19 +1029,19 @@ const ClinicalRiskCalculator = () => {
         eGFR: -0.4936,
         ACR: 0.35066,
         calcium: -0.22129,
-        phosphate: 0.3204,
-        albumin: -0.0805,
-        bicarbonate: -0.03852,
+        phosphate: 0.24197, // corrected from 0.3204
+        albumin: -0.33867, // corrected from -0.0805
+        bicarbonate: -0.07429, // corrected from -0.03852
       };
       const means = {
-        male: 0.56422,
+        male: 0.5642,
         age: 7.0355,
         eGFR: 7.2216,
         ACR: 5.2774,
         calcium: 9.351,
-        phosphate: 4.445,
-        albumin: 38.3,
-        bicarbonate: 23.3,
+        phosphate: 3.9221, // corrected from 4.445
+        albumin: 3.9925, // corrected from 38.3 (g/dL, no unit conversion)
+        bicarbonate: 25.5441, // corrected from 23.3
       };
       const transformed = {
         male: sex === "male" ? 1 : 0,
@@ -1045,7 +1050,7 @@ const ClinicalRiskCalculator = () => {
         ACR: Math.log(parseFloat(uACR)),
         calcium: parseFloat(calcium),
         phosphate: parseFloat(phosphate),
-        albumin: parseFloat(albumin) * 10,
+        albumin: parseFloat(albumin), // corrected: g/dL directly, no * 10
         bicarbonate: parseFloat(bicarbonate),
       };
       const linearPredictor =
@@ -1058,21 +1063,20 @@ const ClinicalRiskCalculator = () => {
         coeffs.albumin * (transformed.albumin - means.albumin) +
         coeffs.bicarbonate * (transformed.bicarbonate - means.bicarbonate);
       twoYearRisk = 1 - Math.pow(0.976, Math.exp(linearPredictor));
-      fiveYearRisk = 1 - Math.pow(0.925, Math.exp(linearPredictor));
+      fiveYearRisk = 1 - Math.pow(0.929, Math.exp(linearPredictor)); // corrected from 0.925
     } else {
       const ageNum = parseFloat(age);
       const egfrNum = parseFloat(eGFR);
       const uacrNum = parseFloat(uACR);
       const sexNum = sex === "male" ? 1 : 0;
-      const logACR = Math.log(Math.max(uacrNum, 0.1));
-      const score4var =
-        -3.0 +
-        0.067 * (ageNum - 50) +
-        0.36 * sexNum +
-        -0.065 * (egfrNum - 30) +
-        0.45 * (logACR - 3);
-      twoYearRisk = 1 - Math.pow(0.929, Math.exp(score4var));
-      fiveYearRisk = 1 - Math.pow(0.772, Math.exp(score4var));
+      // 4-variable KFRE (Tangri et al.) — centered-means form
+      const linearPredictor4 =
+        -0.2201 * (ageNum / 10 - 7.036) +
+        0.2467 * (sexNum - 0.5642) +
+        -0.5567 * (egfrNum / 5 - 7.222) +
+        0.451 * (Math.log(Math.max(uacrNum, 0.1)) - 5.137);
+      twoYearRisk = 1 - Math.pow(0.975, Math.exp(linearPredictor4));
+      fiveYearRisk = 1 - Math.pow(0.924, Math.exp(linearPredictor4));
     }
     const twoYear = Math.max(0, Math.min(1, twoYearRisk)) * 100;
     const fiveYear = Math.max(0, Math.min(1, fiveYearRisk)) * 100;
