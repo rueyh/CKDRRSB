@@ -30,7 +30,7 @@ import explanations from "./explanations.json";
 // Import ZIP code to SDI decile lookup (ZCTA5 → SDI decile 1–10)
 import zipSdiDecile from "./zipSdiDecile.json";
 // PREVENT formula reference text (loaded on demand)
-import preventFormulasRaw from "./PREVENT_Formulas_Reference.txt?raw";
+import preventFormulasRaw from "./PREVENT_Formulas_Reference";
 
 // --- Configuration for Input Validation ---
 const validationConfig = {
@@ -294,28 +294,66 @@ const InfoModal = ({
   show,
   title,
   content,
+  inputExplanations,
   onClose,
 }: {
   show: boolean;
   title: string;
-  content: string;
+  content: string | null;
+  inputExplanations: Record<string, { why: string; how: string }> | null;
   onClose: () => void;
 }) => {
+  const [activeModel, setActiveModel] = React.useState<string>("");
+  const [activeTab, setActiveTab] = React.useState<"why" | "how">("why");
+
+  React.useEffect(() => {
+    if (show && inputExplanations) {
+      const models = Object.keys(inputExplanations);
+      setActiveModel(models[0] ?? "");
+      setActiveTab("why");
+    }
+  }, [show, inputExplanations]);
+
   if (!show) return null;
 
-  const isFormula = title.toLowerCase().includes("formula");
+  const isFormula = content !== null && title.toLowerCase().includes("formula");
+
+  const renderText = (text: string) => (
+    <div className="text-gray-700 leading-relaxed space-y-3">
+      {text
+        .split("\n")
+        .map((para, i) => (para.trim() ? <p key={i}>{para}</p> : null))}
+    </div>
+  );
+
+  const modelColors: Record<string, { tab: string; badge: string }> = {
+    KFRE: {
+      tab: "bg-blue-600 text-white",
+      badge: "bg-blue-100 text-blue-800 border-blue-300",
+    },
+    PREVENT: {
+      tab: "bg-red-600 text-white",
+      badge: "bg-red-100 text-red-800 border-red-300",
+    },
+    KDIGO: {
+      tab: "bg-amber-600 text-white",
+      badge: "bg-amber-100 text-amber-800 border-amber-300",
+    },
+  };
+  const inactiveTabClass =
+    "bg-white text-gray-600 hover:bg-gray-50 border border-gray-200";
 
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl max-w-4xl w-full max-h-[85vh] shadow-2xl border border-gray-200 animate-in zoom-in-95 duration-200"
+        className="bg-white rounded-2xl max-w-4xl w-full max-h-[85vh] shadow-2xl border border-gray-200 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gray-50 rounded-t-2xl">
+        <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gray-50 rounded-t-2xl shrink-0">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
               {isFormula ? (
@@ -326,8 +364,10 @@ const InfoModal = ({
             </div>
             <div>
               <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-              <p className="text-sm text-gray-600">
-                {isFormula
+              <p className="text-sm text-gray-500">
+                {inputExplanations
+                  ? "Clinical context and statistical implementation"
+                  : isFormula
                   ? "Mathematical formulation and implementation details"
                   : "Parameter explanation and clinical context"}
               </p>
@@ -335,46 +375,134 @@ const InfoModal = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-200 rounded-full transition-colors duration-200 group"
+            className="p-2 hover:bg-gray-200 rounded-full transition-colors"
           >
-            <X className="w-6 h-6 text-gray-500 group-hover:text-gray-700" />
+            <X className="w-6 h-6 text-gray-500" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[calc(85vh-120px)]">
-          <div
-            className={`prose prose-gray max-w-none ${
-              isFormula ? "font-mono text-sm" : ""
-            }`}
-          >
+        {/* Input variable: model tabs + Why/How */}
+        {inputExplanations &&
+          (() => {
+            const models = Object.keys(inputExplanations);
+            const current = inputExplanations[activeModel];
+            return (
+              <>
+                {/* Model tabs — shown only when variable appears in >1 model */}
+                {models.length > 1 && (
+                  <div className="flex items-center gap-2 px-6 pt-4 pb-0 shrink-0">
+                    <span className="text-xs font-semibold text-gray-500 mr-1">
+                      Model:
+                    </span>
+                    {models.map((m) => {
+                      const isActive = m === activeModel;
+                      const colors = modelColors[m] ?? {
+                        tab: "bg-purple-600 text-white",
+                        badge: "",
+                      };
+                      return (
+                        <button
+                          key={m}
+                          onClick={() => setActiveModel(m)}
+                          className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                            isActive ? colors.tab : inactiveTabClass
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Why / How toggle */}
+                <div className="flex items-center gap-2 px-6 pt-4 pb-3 border-b border-gray-100 shrink-0">
+                  <span className="text-xs font-semibold text-gray-500 mr-1">
+                    View:
+                  </span>
+                  <button
+                    onClick={() => setActiveTab("why")}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                      activeTab === "why"
+                        ? "bg-purple-600 text-white"
+                        : inactiveTabClass
+                    }`}
+                  >
+                    <Heart className="w-3.5 h-3.5" />
+                    Why it matters
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("how")}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                      activeTab === "how"
+                        ? "bg-purple-600 text-white"
+                        : inactiveTabClass
+                    }`}
+                  >
+                    <Calculator className="w-3.5 h-3.5" />
+                    How it's used
+                  </button>
+                  {/* Badge when only 1 model */}
+                  {models.length === 1 &&
+                    (() => {
+                      const m = models[0];
+                      const colors = modelColors[m] ?? {
+                        badge: "bg-gray-100 text-gray-700 border-gray-300",
+                      };
+                      return (
+                        <span
+                          className={`ml-auto px-3 py-1 rounded-full text-xs font-bold border ${colors.badge}`}
+                        >
+                          {m}
+                        </span>
+                      );
+                    })()}
+                </div>
+
+                {/* Content */}
+                <div className="p-6 overflow-y-auto flex-1">
+                  {current ? (
+                    renderText(activeTab === "why" ? current.why : current.how)
+                  ) : (
+                    <p className="text-gray-400 text-sm">
+                      No content available.
+                    </p>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
+        {/* Formula / output: plain content */}
+        {content !== null && (
+          <div className="p-6 overflow-y-auto flex-1">
             {isFormula ? (
               <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed bg-gray-50 p-4 rounded-lg border overflow-x-auto">
                 {content}
               </pre>
             ) : (
-              <div className="text-gray-700 leading-relaxed">
-                {content.split("\n").map((paragraph, index) => (
-                  <p key={index} className="mb-3 last:mb-0">
-                    {paragraph}
-                  </p>
+              <div className="text-gray-700 leading-relaxed space-y-3">
+                {content.split("\n").map((para, i) => (
+                  <p key={i}>{para}</p>
                 ))}
               </div>
             )}
           </div>
-        </div>
+        )}
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl shrink-0">
           <div className="flex justify-between items-center">
-            <div className="text-xs text-gray-500">
-              {isFormula
+            <div className="text-xs text-gray-400">
+              {inputExplanations
+                ? "Based on published PREVENT, KFRE, and KDIGO equations"
+                : isFormula
                 ? "Equations as published in peer-reviewed literature"
                 : "Clinical parameter information"}
             </div>
             <button
               onClick={onClose}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors duration-200 text-sm font-medium"
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
             >
               Close
             </button>
@@ -492,8 +620,9 @@ const ClinicalRiskCalculator = () => {
   const [showInfoModal, setShowInfoModal] = useState<{
     show: boolean;
     title: string;
-    content: string;
-  }>({ show: false, title: "", content: "" });
+    content: string | null;
+    inputExplanations: Record<string, { why: string; how: string }> | null;
+  }>({ show: false, title: "", content: null, inputExplanations: null });
   const [showEvidenceModal, setShowEvidenceModal] = useState<{
     show: boolean;
     data: any;
@@ -600,28 +729,86 @@ const ClinicalRiskCalculator = () => {
     );
   };
 
+  // Human-readable labels for each input key
+  const inputLabels: Record<string, string> = {
+    age: "Age",
+    sex: "Sex",
+    eGFR: "eGFR",
+    uACR: "Urine ACR (uACR)",
+    albumin: "Serum Albumin",
+    phosphate: "Serum Phosphate",
+    bicarbonate: "Serum Bicarbonate",
+    calcium: "Serum Calcium",
+    totalCholesterol: "Total Cholesterol",
+    hdlCholesterol: "HDL Cholesterol",
+    sbp: "Systolic Blood Pressure",
+    diabetes: "Diabetes",
+    smoking: "Current Smoking",
+    bmi: "BMI",
+    onAntihypertensive: "Anti-hypertensive Use",
+    onStatin: "Statin Use",
+    hba1c: "HbA1c",
+    sdi: "Social Deprivation Index (SDI)",
+  };
+
   const handleInfoClick = useCallback(
     (type: "input" | "output" | "formula", key: string) => {
-      let content, title;
       if (type === "input") {
-        content = explanations.inputs[key as keyof typeof explanations.inputs];
-        title = `About ${key.charAt(0).toUpperCase() + key.slice(1)}`;
+        const rawData = (explanations.inputs as any)[key];
+        if (rawData && typeof rawData === "object") {
+          // New structured format: { MODEL: { why, how } }
+          const inputExplanations: Record<
+            string,
+            { why: string; how: string }
+          > = {};
+          for (const [model, data] of Object.entries(
+            rawData as Record<string, any>
+          )) {
+            inputExplanations[model] = {
+              why: (data.why || "").replace(/\\n/g, "\n"),
+              how: (data.how || "").replace(/\\n/g, "\n"),
+            };
+          }
+          setShowInfoModal({
+            show: true,
+            title: inputLabels[key] ?? key,
+            content: null,
+            inputExplanations,
+          });
+        } else {
+          // Fallback: plain string (legacy)
+          setShowInfoModal({
+            show: true,
+            title: `About ${key.charAt(0).toUpperCase() + key.slice(1)}`,
+            content: rawData ?? "",
+            inputExplanations: null,
+          });
+        }
       } else if (type === "output") {
-        content =
-          explanations.outputs[key as keyof typeof explanations.outputs];
-        title = `About ${key.toUpperCase()} Results`;
+        const content = (explanations.outputs as any)[key] ?? "";
+        setShowInfoModal({
+          show: true,
+          title: `About ${key.toUpperCase()} Results`,
+          content,
+          inputExplanations: null,
+        });
       } else {
         // formula
-        if (key === "prevent") {
-          content = preventFormulasRaw;
-          title = "PREVENT Formula Reference";
-        } else {
-          content =
-            explanations.formulas[key as keyof typeof explanations.formulas];
-          title = `Formula Details for ${key.toUpperCase()}`;
-        }
+        const content =
+          key === "prevent"
+            ? preventFormulasRaw
+            : (explanations.formulas as any)[key] ?? "";
+        const title =
+          key === "prevent"
+            ? "PREVENT Formula Reference"
+            : `Formula Details for ${key.toUpperCase()}`;
+        setShowInfoModal({
+          show: true,
+          title,
+          content,
+          inputExplanations: null,
+        });
       }
-      setShowInfoModal({ show: true, title, content });
     },
     []
   );
@@ -3511,7 +3698,7 @@ const ClinicalRiskCalculator = () => {
                                     unit="% (optional)"
                                     error={validationErrors.a1c}
                                     onInfoClick={() =>
-                                      handleInfoClick("input", "bmi")
+                                      handleInfoClick("input", "hba1c")
                                     }
                                   />
                                   <div>
@@ -3522,7 +3709,7 @@ const ClinicalRiskCalculator = () => {
                                       </span>
                                       <InfoButton
                                         onClick={() =>
-                                          handleInfoClick("input", "sbp")
+                                          handleInfoClick("input", "sdi")
                                         }
                                       />
                                     </label>
@@ -3802,8 +3989,14 @@ const ClinicalRiskCalculator = () => {
         show={showInfoModal.show}
         title={showInfoModal.title}
         content={showInfoModal.content}
+        inputExplanations={showInfoModal.inputExplanations}
         onClose={() =>
-          setShowInfoModal({ show: false, title: "", content: "" })
+          setShowInfoModal({
+            show: false,
+            title: "",
+            content: null,
+            inputExplanations: null,
+          })
         }
       />
 
