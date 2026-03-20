@@ -29,6 +29,8 @@ import {
 import explanations from "./explanations.json";
 // Import ZIP code to SDI decile lookup (ZCTA5 → SDI decile 1–10)
 import zipSdiDecile from "./zipSdiDecile.json";
+// PREVENT formula reference text (loaded on demand)
+import preventFormulasRaw from "./PREVENT_Formulas_Reference.txt?raw";
 
 // --- Configuration for Input Validation ---
 const validationConfig = {
@@ -610,9 +612,14 @@ const ClinicalRiskCalculator = () => {
         title = `About ${key.toUpperCase()} Results`;
       } else {
         // formula
-        content =
-          explanations.formulas[key as keyof typeof explanations.formulas];
-        title = `Formula Details for ${key.toUpperCase()}`;
+        if (key === "prevent") {
+          content = preventFormulasRaw;
+          title = "PREVENT Formula Reference";
+        } else {
+          content =
+            explanations.formulas[key as keyof typeof explanations.formulas];
+          title = `Formula Details for ${key.toUpperCase()}`;
+        }
       }
       setShowInfoModal({ show: true, title, content });
     },
@@ -904,7 +911,7 @@ const ClinicalRiskCalculator = () => {
     const bmi = parseFloat(data.bmi || "25");
     const sex = data.sex;
 
-    // ── Novel-variable inputs ────────────────────────────────────────────────
+    // ── Optional enhanced-variable inputs ────────────────────────────────────
     const uacr_raw = data.uACR ? parseFloat(data.uACR) : null;
     const a1c_raw = data.a1c ? parseFloat(data.a1c) : null;
     const zip = data.zipCode ? data.zipCode.trim().padStart(5, "0") : null;
@@ -915,15 +922,16 @@ const ClinicalRiskCalculator = () => {
     const hasSDI =
       zip !== null &&
       (zipSdiDecile as Record<string, number>)[zip] !== undefined;
+    const nEnhanced = (hasACR ? 1 : 0) + (hasA1c ? 1 : 0) + (hasSDI ? 1 : 0);
 
-    // ── Derived / spline terms (identical across all model variants) ─────────
+    // ── Derived / spline terms (shared across all models) ────────────────────
     const age_t = (age - 55) / 10;
     const nonHDLC_t = (tc - hdl) * 0.02586 - 3.5;
     const HDLC_t = (hdl * 0.02586 - 1.3) / 0.3;
     const sbpLow_t = (Math.min(sbp, 110) - 110) / 20; // ≤ 0
     const sbpHigh_t = (Math.max(sbp, 110) - 130) / 20;
     const egfrLow_t = (Math.min(egfr, 60) - 60) / -15; // ≥ 0 when eGFR < 60
-    const egfrHigh_t = (Math.max(egfr, 60) - 90) / -15; // = 0 at 90, > 0 when 60-90, < 0 when > 90
+    const egfrHigh_t = (Math.max(egfr, 60) - 90) / -15; // 0 at 90; >0 in 60–90; <0 above 90
     const bmiLow_t = (Math.min(bmi, 30) - 25) / 5; // HF only
     const bmiHigh_t = (Math.max(bmi, 30) - 30) / 5; // HF only
     const dm = data.diabetes ? 1 : 0;
@@ -942,384 +950,577 @@ const ClinicalRiskCalculator = () => {
     const int_ageBMI = age_t * bmiHigh_t; // HF only
     const int_ageEGFR = age_t * egfrLow_t;
 
-    // Novel-variable terms
-    const lnACR = hasACR ? Math.log(uacr_raw!) : 0;
-    const a1cDM = hasA1c ? (a1c_raw! - 5.3) * dm : 0;
-    const a1cNoDM = hasA1c ? (a1c_raw! - 5.3) * (1 - dm) : 0;
+    // SDI lookup
     const sdiDecile = hasSDI
       ? (zipSdiDecile as Record<string, number>)[zip!]
       : null;
     const sdiMid = hasSDI ? (sdiDecile! >= 4 && sdiDecile! <= 6 ? 1 : 0) : 0;
     const sdiHigh = hasSDI ? (sdiDecile! >= 7 ? 1 : 0) : 0;
 
-    // ── Coefficient tables ───────────────────────────────────────────────────
-    // Layout: [F_CVD, M_CVD, F_ASCVD, M_ASCVD, F_HF, M_HF]
-    // 0=unused (e.g. nonHDL in HF = 0) handled by setting coefficient to 0.
+    // ── Coefficient arrays: [F_CVD, M_CVD, F_ASCVD, M_ASCVD, F_HF, M_HF] ───
+    // 0 = term not applicable for that outcome (e.g. nonHDLC not used in HF)
 
-    type Coeffs = {
-      age: number[];
-      nonHDLC: number[];
-      HDLC: number[];
-      sbpLow: number[];
-      sbpHigh: number[];
-      dm: number[];
-      smk: number[];
-      bmiLow: number[];
-      bmiHigh: number[];
-      egfrLow: number[];
-      egfrHigh: number[];
-      antihtn: number[];
-      statin: number[];
-      int_treatSBP: number[];
-      int_treatChol: number[];
-      int_ageChol: number[];
-      int_ageHDL: number[];
-      int_ageSBP: number[];
-      int_ageDM: number[];
-      int_ageSmk: number[];
-      int_ageBMI: number[];
-      int_ageEGFR: number[];
-      constant: number[];
-      // enhanced
-      lnACR?: number[];
-      a1cDM?: number[];
-      a1cNoDM?: number[];
-      sdiMid?: number[];
-      sdiHigh?: number[];
-    };
+    // ════════════════════════════════════════════════════════════════════════
+    // MODEL A — BASE (Table S12A)  ·  used when nEnhanced === 0
+    // ════════════════════════════════════════════════════════════════════════
+    const A_c = [
+      -3.307728, -3.031168, -3.819975, -3.500655, -4.310409, -3.946391,
+    ];
+    const A_age = [
+      0.7939329, 0.7688528, 0.719883, 0.7099847, 0.8998235, 0.8972642,
+    ];
+    const A_nHDL = [0.0305239, 0.0736174, 0.1176967, 0.1658663, 0, 0];
+    const A_HDL = [-0.1606857, -0.0954431, -0.151185, -0.1144285, 0, 0];
+    const A_sL = [
+      -0.2394003, -0.4347345, -0.0835358, -0.2837212, -0.4559771, -0.6811466,
+    ];
+    const A_sH = [
+      0.3600781, 0.3362658, 0.3592852, 0.3239977, 0.3576505, 0.3634461,
+    ];
+    const A_dm = [
+      0.8667604, 0.7692857, 0.8348585, 0.7189597, 1.038346, 0.923776,
+    ];
+    const A_smk = [
+      0.5360739, 0.4386871, 0.4831078, 0.3956973, 0.583916, 0.5023736,
+    ];
+    const A_bL = [0, 0, 0, 0, -0.0072294, -0.0485841];
+    const A_bH = [0, 0, 0, 0, 0.2997706, 0.3726929];
+    const A_eL = [
+      0.6045917, 0.5378979, 0.4864619, 0.3690075, 0.7451638, 0.6926917,
+    ];
+    const A_eH = [
+      0.0433769, 0.0164827, 0.0397779, 0.0203619, 0.0557087, 0.0251827,
+    ];
+    const A_aht = [
+      0.3151672, 0.288879, 0.2265309, 0.2036522, 0.3534442, 0.2980922,
+    ];
+    const A_sta = [-0.1477655, -0.1337349, -0.0592374, -0.0865581, 0, 0];
+    const A_tSBP = [
+      -0.0663612, -0.0475924, -0.0395762, -0.0322916, -0.0981511, -0.0497731,
+    ];
+    const A_tCho = [0.1197879, 0.150273, 0.0844423, 0.114563, 0, 0];
+    const A_aCho = [-0.0819715, -0.0517874, -0.0567839, -0.0300005, 0, 0];
+    const A_aHDL = [0.0306769, 0.0191169, 0.0325692, 0.0232747, 0, 0];
+    const A_aSBP = [
+      -0.0946348, -0.1049477, -0.1035985, -0.0927024, -0.0946663, -0.1289201,
+    ];
+    const A_aDM = [
+      -0.27057, -0.2251948, -0.2417542, -0.2018525, -0.3581041, -0.3040924,
+    ];
+    const A_aSmk = [
+      -0.078715, -0.0895067, -0.0791142, -0.0970527, -0.1159453, -0.1401688,
+    ];
+    const A_aBMI = [0, 0, 0, 0, -0.003878, 0.0068126];
+    const A_aEGF = [
+      -0.1637806, -0.1543702, -0.1671492, -0.1217081, -0.1884289, -0.1797778,
+    ];
 
-    // ── BASE MODEL (Table S12A) ──────────────────────────────────────────────
-    const BASE: Coeffs = {
-      age: [0.7939329, 0.7688528, 0.719883, 0.7099847, 0.8998235, 0.8972642],
-      nonHDLC: [0.0305239, 0.0736174, 0.1176967, 0.1658663, 0, 0],
-      HDLC: [-0.1606857, -0.0954431, -0.151185, -0.1144285, 0, 0],
-      sbpLow: [
-        -0.2394003, -0.4347345, -0.0835358, -0.2837212, -0.4559771, -0.6811466,
-      ],
-      sbpHigh: [
-        0.3600781, 0.3362658, 0.3592852, 0.3239977, 0.3576505, 0.3634461,
-      ],
-      dm: [0.8667604, 0.7692857, 0.8348585, 0.7189597, 1.038346, 0.923776],
-      smk: [0.5360739, 0.4386871, 0.4831078, 0.3956973, 0.583916, 0.5023736],
-      bmiLow: [0, 0, 0, 0, -0.0072294, -0.0485841],
-      bmiHigh: [0, 0, 0, 0, 0.2997706, 0.3726929],
-      egfrLow: [
-        0.6045917, 0.5378979, 0.4864619, 0.3690075, 0.7451638, 0.6926917,
-      ],
-      egfrHigh: [
-        0.0433769, 0.0164827, 0.0397779, 0.0203619, 0.0557087, 0.0251827,
-      ],
-      antihtn: [
-        0.3151672, 0.288879, 0.2265309, 0.2036522, 0.3534442, 0.2980922,
-      ],
-      statin: [-0.1477655, -0.1337349, -0.0592374, -0.0865581, 0, 0],
-      int_treatSBP: [
-        -0.0663612, -0.0475924, -0.0395762, -0.0322916, -0.0981511, -0.0497731,
-      ],
-      int_treatChol: [0.1197879, 0.150273, 0.0844423, 0.114563, 0, 0],
-      int_ageChol: [-0.0819715, -0.0517874, -0.0567839, -0.0300005, 0, 0],
-      int_ageHDL: [0.0306769, 0.0191169, 0.0325692, 0.0232747, 0, 0],
-      int_ageSBP: [
-        -0.0946348, -0.1049477, -0.1035985, -0.0927024, -0.0946663, -0.1289201,
-      ],
-      int_ageDM: [
-        -0.27057, -0.2251948, -0.2417542, -0.2018525, -0.3581041, -0.3040924,
-      ],
-      int_ageSmk: [
-        -0.078715, -0.0895067, -0.0791142, -0.0970527, -0.1159453, -0.1401688,
-      ],
-      int_ageBMI: [0, 0, 0, 0, -0.003878, 0.0068126],
-      int_ageEGFR: [
-        -0.1637806, -0.1543702, -0.1671492, -0.1217081, -0.1884289, -0.1797778,
-      ],
-      constant: [
-        -3.307728, -3.031168, -3.819975, -3.500655, -4.310409, -3.946391,
-      ],
-    };
+    // ════════════════════════════════════════════════════════════════════════
+    // MODEL B — Enhanced ACR (Table S12B)  ·  used when nEnhanced === 1 && hasACR
+    // ════════════════════════════════════════════════════════════════════════
+    const B_c = [
+      -3.738341, -3.510705, -4.174614, -3.85146, -4.841506, -4.556907,
+    ];
+    const B_age = [
+      0.7969249, 0.7768655, 0.7201999, 0.7141718, 0.9145975, 0.9111795,
+    ];
+    const B_nHDL = [0.0256635, 0.0659949, 0.1135771, 0.1602194, 0, 0];
+    const B_HDL = [-0.1588107, -0.0951111, -0.1493506, -0.1139086, 0, 0];
+    const B_sL = [
+      -0.2255701, -0.420667, -0.0726677, -0.2719456, -0.4441346, -0.6693649,
+    ];
+    const B_sH = [
+      0.3396649, 0.3120151, 0.3436259, 0.3058719, 0.3260323, 0.3290082,
+    ];
+    const B_dm = [
+      0.8047515, 0.698521, 0.7773094, 0.6600631, 0.9611365, 0.8377655,
+    ];
+    const B_smk = [
+      0.5285338, 0.4314669, 0.4746662, 0.3884022, 0.5755787, 0.4978917,
+    ];
+    const B_bL = [0, 0, 0, 0, 0.0008831, -0.042749];
+    const B_bH = [0, 0, 0, 0, 0.2988964, 0.3624165];
+    const B_eL = [
+      0.4803511, 0.3841364, 0.3824646, 0.2466316, 0.5915291, 0.5075796,
+    ];
+    const B_eH = [
+      0.0434472, 0.009384, 0.0394178, 0.0151852, 0.0556823, 0.0137716,
+    ];
+    const B_aht = [
+      0.2985207, 0.2676494, 0.2125182, 0.186167, 0.3314097, 0.2739963,
+    ];
+    const B_sta = [-0.1497787, -0.1390966, -0.0603046, -0.0894395, 0, 0];
+    const B_tSBP = [
+      -0.0742889, -0.0579315, -0.0466053, -0.0411884, -0.1078596, -0.0645712,
+    ];
+    const B_tCho = [0.106756, 0.1383719, 0.0733118, 0.1058212, 0, 0];
+    const B_aCho = [-0.0778126, -0.0488332, -0.0534262, -0.028089, 0, 0];
+    const B_aHDL = [0.0306768, 0.0200406, 0.0325689, 0.0240427, 0, 0];
+    const B_aSBP = [
+      -0.0907168, -0.102454, -0.0999887, -0.0912325, -0.0875231, -0.1230039,
+    ];
+    const B_aDM = [
+      -0.2705122, -0.2236355, -0.2411762, -0.2004894, -0.356859, -0.3013297,
+    ];
+    const B_aSmk = [
+      -0.0830564, -0.089485, -0.0826941, -0.096936, -0.1220248, -0.1410318,
+    ];
+    const B_aBMI = [0, 0, 0, 0, -0.0053637, 0.0021531];
+    const B_aEGF = [
+      -0.1389249, -0.1321848, -0.1444737, -0.1022867, -0.1610389, -0.1548018,
+    ];
+    const B_lACR = [
+      0.1793037, 0.1887974, 0.1501217, 0.1510073, 0.2197281, 0.2306299,
+    ];
 
-    // ── ACR MODEL (Table S12B) ───────────────────────────────────────────────
-    const ACR: Coeffs = {
-      age: [0.7969249, 0.7768655, 0.7201999, 0.7141718, 0.9145975, 0.9111795],
-      nonHDLC: [0.0256635, 0.0659949, 0.1135771, 0.1602194, 0, 0],
-      HDLC: [-0.1588107, -0.0951111, -0.1493506, -0.1139086, 0, 0],
-      sbpLow: [
-        -0.2255701, -0.420667, -0.0726677, -0.2719456, -0.4441346, -0.6693649,
-      ],
-      sbpHigh: [
-        0.3396649, 0.3120151, 0.3436259, 0.3058719, 0.3260323, 0.3290082,
-      ],
-      dm: [0.8047515, 0.698521, 0.7773094, 0.6600631, 0.9611365, 0.8377655],
-      smk: [0.5285338, 0.4314669, 0.4746662, 0.3884022, 0.5755787, 0.4978917],
-      bmiLow: [0, 0, 0, 0, 0.0008831, -0.042749],
-      bmiHigh: [0, 0, 0, 0, 0.2988964, 0.3624165],
-      egfrLow: [
-        0.4803511, 0.3841364, 0.3824646, 0.2466316, 0.5915291, 0.5075796,
-      ],
-      egfrHigh: [
-        0.0434472, 0.009384, 0.0394178, 0.0151852, 0.0556823, 0.0137716,
-      ],
-      antihtn: [
-        0.2985207, 0.2676494, 0.2125182, 0.186167, 0.3314097, 0.2739963,
-      ],
-      statin: [-0.1497787, -0.1390966, -0.0603046, -0.0894395, 0, 0],
-      int_treatSBP: [
-        -0.0742889, -0.0579315, -0.0466053, -0.0411884, -0.1078596, -0.0645712,
-      ],
-      int_treatChol: [0.106756, 0.1383719, 0.0733118, 0.1058212, 0, 0],
-      int_ageChol: [-0.0778126, -0.0488332, -0.0534262, -0.028089, 0, 0],
-      int_ageHDL: [0.0306768, 0.0200406, 0.0325689, 0.0240427, 0, 0],
-      int_ageSBP: [
-        -0.0907168, -0.102454, -0.0999887, -0.0912325, -0.0875231, -0.1230039,
-      ],
-      int_ageDM: [
-        -0.2705122, -0.2236355, -0.2411762, -0.2004894, -0.356859, -0.3013297,
-      ],
-      int_ageSmk: [
-        -0.0830564, -0.089485, -0.0826941, -0.096936, -0.1220248, -0.1410318,
-      ],
-      int_ageBMI: [0, 0, 0, 0, -0.0053637, 0.0021531],
-      int_ageEGFR: [
-        -0.1389249, -0.1321848, -0.1444737, -0.1022867, -0.1610389, -0.1548018,
-      ],
-      constant: [
-        -3.738341, -3.510705, -4.174614, -3.85146, -4.841506, -4.556907,
-      ],
-      lnACR: [0.1793037, 0.1887974, 0.1501217, 0.1510073, 0.2197281, 0.2306299],
-    };
+    // ════════════════════════════════════════════════════════════════════════
+    // MODEL C — Enhanced A1c (Table S12C)  ·  used when nEnhanced === 1 && hasA1c
+    // ════════════════════════════════════════════════════════════════════════
+    const C_c = [
+      -3.306162, -3.040901, -3.838746, -3.51835, -4.288225, -3.961954,
+    ];
+    const C_age = [
+      0.7858178, 0.7699177, 0.7111831, 0.7064146, 0.8997391, 0.911787,
+    ];
+    const C_nHDL = [0.0194438, 0.0605093, 0.106797, 0.1532267, 0, 0];
+    const C_HDL = [-0.1521964, -0.0888525, -0.1425745, -0.1082166, 0, 0];
+    const C_sL = [
+      -0.2296681, -0.417713, -0.0736824, -0.2675288, -0.4422749, -0.6568071,
+    ];
+    const C_sH = [
+      0.3465777, 0.3288657, 0.3480844, 0.3173809, 0.3378691, 0.3524645,
+    ];
+    const C_dm = [
+      0.5366241, 0.4759471, 0.5112951, 0.432604, 0.681284, 0.5849752,
+    ];
+    const C_smk = [
+      0.5411682, 0.4385663, 0.4880292, 0.3958842, 0.5886005, 0.5014014,
+    ];
+    const C_bL = [0, 0, 0, 0, -0.0148657, -0.0512352];
+    const C_bH = [0, 0, 0, 0, 0.2958374, 0.365294];
+    const C_eL = [
+      0.5931898, 0.5334616, 0.4754997, 0.3665014, 0.73447, 0.6892219,
+    ];
+    const C_eH = [
+      0.0472458, 0.0206431, 0.0438132, 0.0250243, 0.05926, 0.0292377,
+    ];
+    const C_aht = [
+      0.3158567, 0.2917524, 0.2259093, 0.2061158, 0.3543475, 0.3038296,
+    ];
+    const C_sta = [-0.1535174, -0.1383313, -0.0648872, -0.0899988, 0, 0];
+    const C_tSBP = [
+      -0.0687752, -0.0482622, -0.0437645, -0.0334959, -0.1002139, -0.0515032,
+    ];
+    const C_tCho = [0.1054746, 0.1393796, 0.0697082, 0.1034168, 0, 0];
+    const C_aCho = [-0.0761119, -0.0463501, -0.0506382, -0.0255406, 0, 0];
+    const C_aHDL = [0.0307469, 0.0205926, 0.0327475, 0.0247538, 0, 0];
+    const C_aSBP = [
+      -0.0905966, -0.1037717, -0.0996442, -0.0917441, -0.0878765, -0.1262343,
+    ];
+    const C_aDM = [
+      -0.2241857, -0.1737697, -0.1924338, -0.1499195, -0.303684, -0.2449514,
+    ];
+    const C_aSmk = [
+      -0.080186, -0.0915839, -0.0803539, -0.098089, -0.1178943, -0.1392217,
+    ];
+    const C_aBMI = [0, 0, 0, 0, -0.008345, 0.0009592];
+    const C_aEGF = [
+      -0.1667286, -0.1637039, -0.1682586, -0.1305231, -0.1912183, -0.1917105,
+    ];
+    const C_aDMa = [
+      0.1338348, 0.13159, 0.1339055, 0.1157161, 0.1856442, 0.1652857,
+    ]; // a1cDM
+    const C_aNDM = [
+      0.1622409, 0.1295185, 0.1596461, 0.1288303, 0.1833083, 0.1505859,
+    ]; // a1cNoDM
 
-    // ── A1c MODEL (Table S12C) ───────────────────────────────────────────────
-    const A1C: Coeffs = {
-      age: [0.7858178, 0.7699177, 0.7111831, 0.7064146, 0.8997391, 0.911787],
-      nonHDLC: [0.0194438, 0.0605093, 0.106797, 0.1532267, 0, 0],
-      HDLC: [-0.1521964, -0.0888525, -0.1425745, -0.1082166, 0, 0],
-      sbpLow: [
-        -0.2296681, -0.417713, -0.0736824, -0.2675288, -0.4422749, -0.6568071,
-      ],
-      sbpHigh: [
-        0.3465777, 0.3288657, 0.3480844, 0.3173809, 0.3378691, 0.3524645,
-      ],
-      dm: [0.5366241, 0.4759471, 0.5112951, 0.432604, 0.681284, 0.5849752],
-      smk: [0.5411682, 0.4385663, 0.4880292, 0.3958842, 0.5886005, 0.5014014],
-      bmiLow: [0, 0, 0, 0, -0.0148657, -0.0512352],
-      bmiHigh: [0, 0, 0, 0, 0.2958374, 0.365294],
-      egfrLow: [0.5931898, 0.5334616, 0.4754997, 0.3665014, 0.73447, 0.6892219],
-      egfrHigh: [
-        0.0472458, 0.0206431, 0.0438132, 0.0250243, 0.05926, 0.0292377,
-      ],
-      antihtn: [
-        0.3158567, 0.2917524, 0.2259093, 0.2061158, 0.3543475, 0.3038296,
-      ],
-      statin: [-0.1535174, -0.1383313, -0.0648872, -0.0899988, 0, 0],
-      int_treatSBP: [
-        -0.0687752, -0.0482622, -0.0437645, -0.0334959, -0.1002139, -0.0515032,
-      ],
-      int_treatChol: [0.1054746, 0.1393796, 0.0697082, 0.1034168, 0, 0],
-      int_ageChol: [-0.0761119, -0.0463501, -0.0506382, -0.0255406, 0, 0],
-      int_ageHDL: [0.0307469, 0.0205926, 0.0327475, 0.0247538, 0, 0],
-      int_ageSBP: [
-        -0.0905966, -0.1037717, -0.0996442, -0.0917441, -0.0878765, -0.1262343,
-      ],
-      int_ageDM: [
-        -0.2241857, -0.1737697, -0.1924338, -0.1499195, -0.303684, -0.2449514,
-      ],
-      int_ageSmk: [
-        -0.080186, -0.0915839, -0.0803539, -0.098089, -0.1178943, -0.1392217,
-      ],
-      int_ageBMI: [0, 0, 0, 0, -0.008345, 0.0009592],
-      int_ageEGFR: [
-        -0.1667286, -0.1637039, -0.1682586, -0.1305231, -0.1912183, -0.1917105,
-      ],
-      constant: [
-        -3.306162, -3.040901, -3.838746, -3.51835, -4.288225, -3.961954,
-      ],
-      a1cDM: [0.1338348, 0.13159, 0.1339055, 0.1157161, 0.1856442, 0.1652857],
-      a1cNoDM: [
-        0.1622409, 0.1295185, 0.1596461, 0.1288303, 0.1833083, 0.1505859,
-      ],
-    };
+    // ════════════════════════════════════════════════════════════════════════
+    // MODEL D — Enhanced SDI (Table S12D)  ·  used when nEnhanced === 1 && hasSDI
+    // ════════════════════════════════════════════════════════════════════════
+    const D_c = [
+      -3.461564, -3.159572, -3.955898, -3.624712, -4.409382, -4.058977,
+    ];
+    const D_age = [
+      0.7754083, 0.7756377, 0.7028123, 0.7150087, 0.8819156, 0.894179,
+    ];
+    const D_nHDL = [0.0221756, 0.0715325, 0.1056078, 0.1627339, 0, 0];
+    const D_HDL = [-0.1650828, -0.0976775, -0.1502263, -0.1194988, 0, 0];
+    const D_sL = [
+      -0.2180808, -0.5186614, -0.0488757, -0.363659, -0.4495491, -0.7067398,
+    ];
+    const D_sH = [
+      0.3381188, 0.3235653, 0.3402681, 0.3179476, 0.3457405, 0.350241,
+    ];
+    const D_dm = [
+      0.8624372, 0.7722496, 0.838022, 0.7156422, 1.02632, 0.9252453,
+    ];
+    const D_smk = [
+      0.4663953, 0.3761129, 0.4064592, 0.3404477, 0.5371646, 0.4364765,
+    ];
+    const D_bL = [0, 0, 0, 0, -0.0168447, -0.0866297];
+    const D_bH = [0, 0, 0, 0, 0.2805126, 0.3706765];
+    const D_eL = [
+      0.5919004, 0.5180893, 0.4838394, 0.3545754, 0.7315223, 0.6696768,
+    ];
+    const D_eH = [
+      0.0516821, 0.0118451, 0.0480415, 0.0157875, 0.0651679, 0.0237374,
+    ];
+    const D_aht = [
+      0.3182166, 0.2634094, 0.2270648, 0.1786233, 0.3491487, 0.2688352,
+    ];
+    const D_sta = [-0.1460816, -0.1455263, -0.0585626, -0.1018269, 0, 0];
+    const D_tSBP = [
+      -0.0574455, -0.0367013, -0.0349485, -0.028313, -0.0890335, -0.0434892,
+    ];
+    const D_tCho = [0.1302287, 0.1617785, 0.1017299, 0.1209467, 0, 0];
+    const D_aCho = [-0.083509, -0.0507669, -0.062389, -0.0285806, 0, 0];
+    const D_aHDL = [0.0282181, 0.0178356, 0.0285106, 0.0247348, 0, 0];
+    const D_aSBP = [
+      -0.0952647, -0.1059337, -0.1033711, -0.0919494, -0.0971028, -0.1297155,
+    ];
+    const D_aDM = [
+      -0.2718966, -0.2236755, -0.2477845, -0.1981491, -0.3528078, -0.299086,
+    ];
+    const D_aSmk = [
+      -0.0641738, -0.0723216, -0.0544326, -0.0776891, -0.106216, -0.1079522,
+    ];
+    const D_aBMI = [0, 0, 0, 0, 0.0064998, 0.0130483];
+    const D_aEGF = [
+      -0.1717026, -0.1548205, -0.1735372, -0.1284899, -0.1899413, -0.1797791,
+    ];
+    const D_sMid = [
+      0.1442776, 0.0889119, 0.1473705, 0.0728242, 0.1343318, 0.1235632,
+    ];
+    const D_sHi = [
+      0.2421409, 0.291897, 0.2451878, 0.2824453, 0.2496522, 0.3592212,
+    ];
 
-    // ── SDI MODEL (Table S12D) ───────────────────────────────────────────────
-    const SDI: Coeffs = {
-      age: [0.7754083, 0.7756377, 0.7028123, 0.7150087, 0.8819156, 0.894179],
-      nonHDLC: [0.0221756, 0.0715325, 0.1056078, 0.1627339, 0, 0],
-      HDLC: [-0.1650828, -0.0976775, -0.1502263, -0.1194988, 0, 0],
-      sbpLow: [
-        -0.2180808, -0.5186614, -0.0488757, -0.363659, -0.4495491, -0.7067398,
-      ],
-      sbpHigh: [
-        0.3381188, 0.3235653, 0.3402681, 0.3179476, 0.3457405, 0.350241,
-      ],
-      dm: [0.8624372, 0.7722496, 0.838022, 0.7156422, 1.02632, 0.9252453],
-      smk: [0.4663953, 0.3761129, 0.4064592, 0.3404477, 0.5371646, 0.4364765],
-      bmiLow: [0, 0, 0, 0, -0.0168447, -0.0866297],
-      bmiHigh: [0, 0, 0, 0, 0.2805126, 0.3706765],
-      egfrLow: [
-        0.5919004, 0.5180893, 0.4838394, 0.3545754, 0.7315223, 0.6696768,
-      ],
-      egfrHigh: [
-        0.0516821, 0.0118451, 0.0480415, 0.0157875, 0.0651679, 0.0237374,
-      ],
-      antihtn: [
-        0.3182166, 0.2634094, 0.2270648, 0.1786233, 0.3491487, 0.2688352,
-      ],
-      statin: [-0.1460816, -0.1455263, -0.0585626, -0.1018269, 0, 0],
-      int_treatSBP: [
-        -0.0574455, -0.0367013, -0.0349485, -0.028313, -0.0890335, -0.0434892,
-      ],
-      int_treatChol: [0.1302287, 0.1617785, 0.1017299, 0.1209467, 0, 0],
-      int_ageChol: [-0.083509, -0.0507669, -0.062389, -0.0285806, 0, 0],
-      int_ageHDL: [0.0282181, 0.0178356, 0.0285106, 0.0247348, 0, 0],
-      int_ageSBP: [
-        -0.0952647, -0.1059337, -0.1033711, -0.0919494, -0.0971028, -0.1297155,
-      ],
-      int_ageDM: [
-        -0.2718966, -0.2236755, -0.2477845, -0.1981491, -0.3528078, -0.299086,
-      ],
-      int_ageSmk: [
-        -0.0641738, -0.0723216, -0.0544326, -0.0776891, -0.106216, -0.1079522,
-      ],
-      int_ageBMI: [0, 0, 0, 0, 0.0064998, 0.0130483],
-      int_ageEGFR: [
-        -0.1717026, -0.1548205, -0.1735372, -0.1284899, -0.1899413, -0.1797791,
-      ],
-      constant: [
-        -3.461564, -3.159572, -3.955898, -3.624712, -4.409382, -4.058977,
-      ],
-      sdiMid: [
-        0.1442776, 0.0889119, 0.1473705, 0.0728242, 0.1343318, 0.1235632,
-      ],
-      sdiHigh: [
-        0.2421409, 0.291897, 0.2451878, 0.2824453, 0.2496522, 0.3592212,
-      ],
-    };
+    // ════════════════════════════════════════════════════════════════════════
+    // MODEL E — FULL (Table S12E)  ·  used when nEnhanced === 2 or 3
+    // Missing-variable indicator terms applied for each absent optional variable
+    // ════════════════════════════════════════════════════════════════════════
+    const E_c = [
+      -3.860385, -3.631387, -4.291503, -3.969788, -4.896524, -4.663513,
+    ];
+    const E_age = [
+      0.7716794, 0.7847578, 0.7023067, 0.7128741, 0.884209, 0.9095703,
+    ];
+    const E_nHDL = [0.0062109, 0.0534485, 0.0898765, 0.1465201, 0, 0];
+    const E_HDL = [-0.1547756, -0.0911282, -0.1407316, -0.1125794, 0, 0];
+    const E_sL = [
+      -0.1933123, -0.4921973, -0.0256648, -0.3387216, -0.421474, -0.6765184,
+    ];
+    const E_sH = [
+      0.3071217, 0.2972415, 0.314511, 0.2980252, 0.3002919, 0.3111651,
+    ];
+    const E_dm = [
+      0.496753, 0.4527054, 0.4799217, 0.399583, 0.6170359, 0.5535052,
+    ];
+    const E_smk = [
+      0.466605, 0.3726641, 0.4062049, 0.3379111, 0.5380269, 0.4326811,
+    ];
+    const E_bL = [0, 0, 0, 0, -0.0191335, -0.0854286];
+    const E_bH = [0, 0, 0, 0, 0.2764302, 0.3551736];
+    const E_eL = [
+      0.4780697, 0.3886854, 0.3847744, 0.2582604, 0.5975847, 0.5102245,
+    ];
+    const E_eH = [
+      0.0529077, 0.0081661, 0.0495174, 0.0147769, 0.0654197, 0.015472,
+    ];
+    const E_aht = [
+      0.3034892, 0.2508052, 0.2133861, 0.1686621, 0.3313614, 0.2570964,
+    ];
+    const E_sta = [-0.1556524, -0.1538484, -0.0678552, -0.1073619, 0, 0];
+    const E_tSBP = [
+      -0.0667026, -0.0474695, -0.0451416, -0.0381038, -0.1002304, -0.0591177,
+    ];
+    const E_tCho = [0.1061825, 0.1415382, 0.0788187, 0.1034169, 0, 0];
+    const E_aCho = [-0.0742271, -0.0436455, -0.0535985, -0.0228755, 0, 0];
+    const E_aHDL = [0.0288245, 0.0199549, 0.0291762, 0.0267453, 0, 0];
+    const E_aSBP = [
+      -0.0875188, -0.1022686, -0.0961839, -0.0897449, -0.0845363, -0.1219056,
+    ];
+    const E_aDM = [
+      -0.2267102, -0.1762507, -0.2001466, -0.1497464, -0.2989062, -0.2437577,
+    ];
+    const E_aSmk = [
+      -0.0676125, -0.0715873, -0.0586472, -0.077206, -0.1111354, -0.105363,
+    ];
+    const E_aBMI = [0, 0, 0, 0, 0.0008104, 0.0037907];
+    const E_aEGF = [
+      -0.1493231, -0.1428668, -0.1537791, -0.1198368, -0.1666635, -0.1660207,
+    ];
+    // Novel-variable present terms
+    const E_lACR = [
+      0.1645922, 0.1772853, 0.1371824, 0.1375837, 0.1948135, 0.2164607,
+    ];
+    const E_aDMa = [
+      0.1298513, 0.1165698, 0.123192, 0.101282, 0.176668, 0.148297,
+    ]; // a1cDM
+    const E_aNDM = [
+      0.1412555, 0.1048297, 0.1410572, 0.1092726, 0.1614911, 0.1234088,
+    ]; // a1cNoDM
+    const E_sMid = [
+      0.1361989, 0.0802431, 0.1413965, 0.0651121, 0.1213034, 0.1106372,
+    ];
+    const E_sHi = [
+      0.2261596, 0.275073, 0.228136, 0.2676683, 0.2314147, 0.3371204,
+    ];
+    // Missing-variable indicator terms (× 1 when that variable is absent)
+    const E_mACR = [
+      0.0198413, 0.1095674, 0.0061613, 0.0652944, 0.0395368, 0.1702805,
+    ];
+    const E_mA1c = [
+      -0.0031658, -0.0230072, 0.005866, -0.0112852, -0.0010583, -0.0234637,
+    ];
+    const E_mSDI = [
+      0.1804508, 0.144759, 0.1588908, 0.1388492, 0.1819138, 0.1694628,
+    ];
 
-    // ── FULL MODEL (Table S12E) ──────────────────────────────────────────────
-    const FULL: Coeffs = {
-      age: [0.7716794, 0.7847578, 0.7023067, 0.7128741, 0.884209, 0.9095703],
-      nonHDLC: [0.0062109, 0.0534485, 0.0898765, 0.1465201, 0, 0],
-      HDLC: [-0.1547756, -0.0911282, -0.1407316, -0.1125794, 0, 0],
-      sbpLow: [
-        -0.1933123, -0.4921973, -0.0256648, -0.3387216, -0.421474, -0.6765184,
-      ],
-      sbpHigh: [
-        0.3071217, 0.2972415, 0.314511, 0.2980252, 0.3002919, 0.3111651,
-      ],
-      dm: [0.496753, 0.4527054, 0.4799217, 0.399583, 0.6170359, 0.5535052],
-      smk: [0.466605, 0.3726641, 0.4062049, 0.3379111, 0.5380269, 0.4326811],
-      bmiLow: [0, 0, 0, 0, -0.0191335, -0.0854286],
-      bmiHigh: [0, 0, 0, 0, 0.2764302, 0.3551736],
-      egfrLow: [
-        0.4780697, 0.3886854, 0.3847744, 0.2582604, 0.5975847, 0.5102245,
-      ],
-      egfrHigh: [
-        0.0529077, 0.0081661, 0.0495174, 0.0147769, 0.0654197, 0.015472,
-      ],
-      antihtn: [
-        0.3034892, 0.2508052, 0.2133861, 0.1686621, 0.3313614, 0.2570964,
-      ],
-      statin: [-0.1556524, -0.1538484, -0.0678552, -0.1073619, 0, 0],
-      int_treatSBP: [
-        -0.0667026, -0.0474695, -0.0451416, -0.0381038, -0.1002304, -0.0591177,
-      ],
-      int_treatChol: [0.1061825, 0.1415382, 0.0788187, 0.1034169, 0, 0],
-      int_ageChol: [-0.0742271, -0.0436455, -0.0535985, -0.0228755, 0, 0],
-      int_ageHDL: [0.0288245, 0.0199549, 0.0291762, 0.0267453, 0, 0],
-      int_ageSBP: [
-        -0.0875188, -0.1022686, -0.0961839, -0.0897449, -0.0845363, -0.1219056,
-      ],
-      int_ageDM: [
-        -0.2267102, -0.1762507, -0.2001466, -0.1497464, -0.2989062, -0.2437577,
-      ],
-      int_ageSmk: [
-        -0.0676125, -0.0715873, -0.0586472, -0.077206, -0.1111354, -0.105363,
-      ],
-      int_ageBMI: [0, 0, 0, 0, 0.0008104, 0.0037907],
-      int_ageEGFR: [
-        -0.1493231, -0.1428668, -0.1537791, -0.1198368, -0.1666635, -0.1660207,
-      ],
-      constant: [
-        -3.860385, -3.631387, -4.291503, -3.969788, -4.896524, -4.663513,
-      ],
-      lnACR: [0.1645922, 0.1772853, 0.1371824, 0.1375837, 0.1948135, 0.2164607],
-      a1cDM: [0.1298513, 0.1165698, 0.123192, 0.101282, 0.176668, 0.148297],
-      a1cNoDM: [
-        0.1412555, 0.1048297, 0.1410572, 0.1092726, 0.1614911, 0.1234088,
-      ],
-      sdiMid: [
-        0.1361989, 0.0802431, 0.1413965, 0.0651121, 0.1213034, 0.1106372,
-      ],
-      sdiHigh: [0.2261596, 0.275073, 0.228136, 0.2676683, 0.2314147, 0.3371204],
-    };
+    // ── Core log-odds helper (terms identical across all models) ─────────────
+    const coreLogOdds = (
+      i: number,
+      c: number[],
+      age_: number[],
+      nHDL: number[],
+      HDL_: number[],
+      sL: number[],
+      sH: number[],
+      dm_: number[],
+      smk_: number[],
+      bL: number[],
+      bH: number[],
+      eL: number[],
+      eH: number[],
+      aht: number[],
+      sta: number[],
+      tSBP: number[],
+      tCho: number[],
+      aCho: number[],
+      aHDL: number[],
+      aSBP: number[],
+      aDM_: number[],
+      aSmk: number[],
+      aBMI: number[],
+      aEGF: number[]
+    ): number =>
+      c[i] +
+      age_[i] * age_t +
+      nHDL[i] * nonHDLC_t +
+      HDL_[i] * HDLC_t +
+      sL[i] * sbpLow_t +
+      sH[i] * sbpHigh_t +
+      dm_[i] * dm +
+      smk_[i] * smk +
+      bL[i] * bmiLow_t +
+      bH[i] * bmiHigh_t +
+      eL[i] * egfrLow_t +
+      eH[i] * egfrHigh_t +
+      aht[i] * antihtn +
+      sta[i] * statin +
+      tSBP[i] * int_treatSBP +
+      tCho[i] * int_treatChol +
+      aCho[i] * int_ageChol +
+      aHDL[i] * int_ageHDL +
+      aSBP[i] * int_ageSBP +
+      aDM_[i] * int_ageDM +
+      aSmk[i] * int_ageSmk +
+      aBMI[i] * int_ageBMI +
+      aEGF[i] * int_ageEGFR;
 
-    // ── Model selection ──────────────────────────────────────────────────────
-    // Prefer the most-enhanced model whose novel variables are all present.
-    let C: Coeffs;
+    // ── Model label ──────────────────────────────────────────────────────────
     let modelLabel: string;
-    if (hasACR && hasA1c && hasSDI) {
-      C = FULL;
-      modelLabel = "Full (ACR + A1c + SDI)";
-    } else if (hasACR && hasA1c) {
-      // No Full without SDI; use ACR model and also add A1c terms from A1c model.
-      // Per published guidance, use the most inclusive single-enhancement model
-      // that matches. With two of three novel vars, we use Full coefficients but
-      // set SDI terms to zero (missing-SDI treatment → treated as reference 1-3).
-      C = { ...FULL, sdiMid: [0, 0, 0, 0, 0, 0], sdiHigh: [0, 0, 0, 0, 0, 0] };
-      modelLabel = "Full (ACR + A1c, SDI missing → reference)";
-    } else if (hasACR && hasSDI) {
-      C = { ...FULL, a1cDM: [0, 0, 0, 0, 0, 0], a1cNoDM: [0, 0, 0, 0, 0, 0] };
-      modelLabel = "Full (ACR + SDI, A1c missing → reference)";
-    } else if (hasA1c && hasSDI) {
-      C = { ...FULL, lnACR: [0, 0, 0, 0, 0, 0] };
-      modelLabel = "Full (A1c + SDI, ACR missing → reference)";
-    } else if (hasACR) {
-      C = ACR;
-      modelLabel = "Enhanced (ACR)";
-    } else if (hasA1c) {
-      C = A1C;
-      modelLabel = "Enhanced (A1c)";
-    } else if (hasSDI) {
-      C = SDI;
-      modelLabel = "Enhanced (SDI)";
+    if (nEnhanced === 0) {
+      modelLabel = "Base (S12A)";
+    } else if (nEnhanced === 1) {
+      if (hasACR) modelLabel = "Enhanced ACR (S12B)";
+      else if (hasA1c) modelLabel = "Enhanced HbA1c (S12C)";
+      else modelLabel = `Enhanced SDI decile ${sdiDecile} (S12D)`;
     } else {
-      C = BASE;
-      modelLabel = "Base";
+      const parts: string[] = [];
+      if (hasACR) parts.push("uACR");
+      if (hasA1c) parts.push("HbA1c");
+      if (hasSDI) parts.push(`SDI d${sdiDecile}`);
+      const miss: string[] = [];
+      if (!hasACR) miss.push("ACR→missing");
+      if (!hasA1c) miss.push("A1c→missing");
+      if (!hasSDI) miss.push("SDI→missing");
+      modelLabel =
+        `Full S12E: ${parts.join("+")}` +
+        (miss.length ? ` (${miss.join(", ")})` : "");
     }
 
-    // ── Generic log-odds calculator ──────────────────────────────────────────
-    // idx: 0=F_CVD,1=M_CVD, 2=F_ASCVD,3=M_ASCVD, 4=F_HF,5=M_HF
-    const logOdds = (idx: number): number =>
-      C.constant[idx] +
-      C.age[idx] * age_t +
-      C.nonHDLC[idx] * nonHDLC_t +
-      C.HDLC[idx] * HDLC_t +
-      C.sbpLow[idx] * sbpLow_t +
-      C.sbpHigh[idx] * sbpHigh_t +
-      C.dm[idx] * dm +
-      C.smk[idx] * smk +
-      C.bmiLow[idx] * bmiLow_t +
-      C.bmiHigh[idx] * bmiHigh_t +
-      C.egfrLow[idx] * egfrLow_t +
-      C.egfrHigh[idx] * egfrHigh_t +
-      C.antihtn[idx] * antihtn +
-      C.statin[idx] * statin +
-      C.int_treatSBP[idx] * int_treatSBP +
-      C.int_treatChol[idx] * int_treatChol +
-      C.int_ageChol[idx] * int_ageChol +
-      C.int_ageHDL[idx] * int_ageHDL +
-      C.int_ageSBP[idx] * int_ageSBP +
-      C.int_ageDM[idx] * int_ageDM +
-      C.int_ageSmk[idx] * int_ageSmk +
-      C.int_ageBMI[idx] * int_ageBMI +
-      C.int_ageEGFR[idx] * int_ageEGFR +
-      (C.lnACR ? C.lnACR[idx] * lnACR : 0) +
-      (C.a1cDM ? C.a1cDM[idx] * a1cDM : 0) +
-      (C.a1cNoDM ? C.a1cNoDM[idx] * a1cNoDM : 0) +
-      (C.sdiMid ? C.sdiMid[idx] * sdiMid : 0) +
-      (C.sdiHigh ? C.sdiHigh[idx] * sdiHigh : 0);
+    // ── Per-index log-odds ───────────────────────────────────────────────────
+    // idx: 0=F_CVD, 1=M_CVD, 2=F_ASCVD, 3=M_ASCVD, 4=F_HF, 5=M_HF
+    const logOdds = (idx: number): number => {
+      if (nEnhanced === 0) {
+        // ── BASE model ───────────────────────────────────────────────────────
+        return coreLogOdds(
+          idx,
+          A_c,
+          A_age,
+          A_nHDL,
+          A_HDL,
+          A_sL,
+          A_sH,
+          A_dm,
+          A_smk,
+          A_bL,
+          A_bH,
+          A_eL,
+          A_eH,
+          A_aht,
+          A_sta,
+          A_tSBP,
+          A_tCho,
+          A_aCho,
+          A_aHDL,
+          A_aSBP,
+          A_aDM,
+          A_aSmk,
+          A_aBMI,
+          A_aEGF
+        );
+      } else if (nEnhanced === 1 && hasACR) {
+        // ── Enhanced ACR (S12B) ──────────────────────────────────────────────
+        return (
+          coreLogOdds(
+            idx,
+            B_c,
+            B_age,
+            B_nHDL,
+            B_HDL,
+            B_sL,
+            B_sH,
+            B_dm,
+            B_smk,
+            B_bL,
+            B_bH,
+            B_eL,
+            B_eH,
+            B_aht,
+            B_sta,
+            B_tSBP,
+            B_tCho,
+            B_aCho,
+            B_aHDL,
+            B_aSBP,
+            B_aDM,
+            B_aSmk,
+            B_aBMI,
+            B_aEGF
+          ) +
+          B_lACR[idx] * Math.log(uacr_raw!)
+        );
+      } else if (nEnhanced === 1 && hasA1c) {
+        // ── Enhanced A1c (S12C) ──────────────────────────────────────────────
+        return (
+          coreLogOdds(
+            idx,
+            C_c,
+            C_age,
+            C_nHDL,
+            C_HDL,
+            C_sL,
+            C_sH,
+            C_dm,
+            C_smk,
+            C_bL,
+            C_bH,
+            C_eL,
+            C_eH,
+            C_aht,
+            C_sta,
+            C_tSBP,
+            C_tCho,
+            C_aCho,
+            C_aHDL,
+            C_aSBP,
+            C_aDM,
+            C_aSmk,
+            C_aBMI,
+            C_aEGF
+          ) +
+          C_aDMa[idx] * (a1c_raw! - 5.3) * dm +
+          C_aNDM[idx] * (a1c_raw! - 5.3) * (1 - dm)
+        );
+      } else if (nEnhanced === 1 && hasSDI) {
+        // ── Enhanced SDI (S12D) ──────────────────────────────────────────────
+        return (
+          coreLogOdds(
+            idx,
+            D_c,
+            D_age,
+            D_nHDL,
+            D_HDL,
+            D_sL,
+            D_sH,
+            D_dm,
+            D_smk,
+            D_bL,
+            D_bH,
+            D_eL,
+            D_eH,
+            D_aht,
+            D_sta,
+            D_tSBP,
+            D_tCho,
+            D_aCho,
+            D_aHDL,
+            D_aSBP,
+            D_aDM,
+            D_aSmk,
+            D_aBMI,
+            D_aEGF
+          ) +
+          D_sMid[idx] * sdiMid +
+          D_sHi[idx] * sdiHigh
+        );
+      } else {
+        // ── FULL model (S12E) — nEnhanced === 2 or 3 ────────────────────────
+        let lo = coreLogOdds(
+          idx,
+          E_c,
+          E_age,
+          E_nHDL,
+          E_HDL,
+          E_sL,
+          E_sH,
+          E_dm,
+          E_smk,
+          E_bL,
+          E_bH,
+          E_eL,
+          E_eH,
+          E_aht,
+          E_sta,
+          E_tSBP,
+          E_tCho,
+          E_aCho,
+          E_aHDL,
+          E_aSBP,
+          E_aDM,
+          E_aSmk,
+          E_aBMI,
+          E_aEGF
+        );
+        // ACR: actual term if present, missing indicator if absent
+        lo += hasACR ? E_lACR[idx] * Math.log(uacr_raw!) : E_mACR[idx];
+        // HbA1c: actual terms if present, missing indicator if absent
+        lo += hasA1c
+          ? E_aDMa[idx] * (a1c_raw! - 5.3) * dm +
+            E_aNDM[idx] * (a1c_raw! - 5.3) * (1 - dm)
+          : E_mA1c[idx];
+        // SDI: actual terms if present, missing indicator if absent
+        lo += hasSDI
+          ? E_sMid[idx] * sdiMid + E_sHi[idx] * sdiHigh
+          : E_mSDI[idx];
+        return lo;
+      }
+    };
 
     const toRisk = (lo: number) => (Math.exp(lo) / (1 + Math.exp(lo))) * 100;
-
-    const fi = sex === "female" ? 0 : 1; // female offset = 0, male = 1
+    const fi = sex === "female" ? 0 : 1; // 0 = female index; 1 = male
 
     return {
       cvd: Math.max(0, Math.min(100, toRisk(logOdds(fi)))),
@@ -2902,7 +3103,7 @@ const ClinicalRiskCalculator = () => {
         <nav className="flex justify-center mb-4 space-x-3">
           <TabButton
             id="krfe"
-            label="KRFE"
+            label="KFRE"
             icon={Droplets}
             active={activeTab === "krfe"}
             onClick={setActiveTab}
@@ -3173,6 +3374,7 @@ const ClinicalRiskCalculator = () => {
                         ) : (
                           <>
                             {" "}
+                            {/* ── Row 1: Age / Sex / eGFR / BMI (PREVENT) or uACR (KFRE/KDIGO) ── */}
                             <div className="grid grid-cols-4 gap-3">
                               {" "}
                               <CompactInputField
@@ -3201,30 +3403,46 @@ const ClinicalRiskCalculator = () => {
                                 value={formState.eGFR}
                                 onChange={handleInputChange}
                                 onBlur={handleInputBlur}
-                                unit="mL/min/1.73mÂ²"
+                                unit="mL/min/1.73m²"
                                 required
                                 error={validationErrors.eGFR}
                                 onInfoClick={() =>
                                   handleInfoClick("input", "eGFR")
                                 }
                               />{" "}
-                              <CompactInputField
-                                label="uACR"
-                                name="uACR"
-                                value={formState.uACR}
-                                onChange={handleInputChange}
-                                onBlur={handleInputBlur}
-                                unit="mg/g"
-                                required
-                                error={validationErrors.uACR}
-                                onInfoClick={() =>
-                                  handleInfoClick("input", "uACR")
-                                }
-                              />{" "}
+                              {activeTab === "prevent" ? (
+                                <CompactInputField
+                                  label="BMI"
+                                  name="bmi"
+                                  value={formState.bmi}
+                                  onChange={handleInputChange}
+                                  onBlur={handleInputBlur}
+                                  unit="kg/m²"
+                                  error={validationErrors.bmi}
+                                  onInfoClick={() =>
+                                    handleInfoClick("input", "bmi")
+                                  }
+                                />
+                              ) : (
+                                <CompactInputField
+                                  label="uACR"
+                                  name="uACR"
+                                  value={formState.uACR}
+                                  onChange={handleInputChange}
+                                  onBlur={handleInputBlur}
+                                  unit="mg/g"
+                                  required
+                                  error={validationErrors.uACR}
+                                  onInfoClick={() =>
+                                    handleInfoClick("input", "uACR")
+                                  }
+                                />
+                              )}{" "}
                             </div>
                             {activeTab === "prevent" && (
                               <>
                                 {" "}
+                                {/* ── Row 2: SBP / Total Chol / HDL ── */}
                                 <div className="grid grid-cols-3 gap-3">
                                   {" "}
                                   <CompactInputField
@@ -3270,39 +3488,37 @@ const ClinicalRiskCalculator = () => {
                                     }
                                   />{" "}
                                 </div>{" "}
-                                <div className="grid grid-cols-2 gap-3">
-                                  {" "}
+                                {/* ── Row 3: uACR / HbA1c / ZIP — all optional ── */}
+                                <div className="grid grid-cols-3 gap-3">
                                   <CompactInputField
-                                    label="BMI"
-                                    name="bmi"
-                                    value={formState.bmi}
+                                    label="uACR"
+                                    name="uACR"
+                                    value={formState.uACR}
                                     onChange={handleInputChange}
                                     onBlur={handleInputBlur}
-                                    unit="kg/m²"
-                                    error={validationErrors.bmi}
+                                    unit="mg/g (optional)"
+                                    error={validationErrors.uACR}
                                     onInfoClick={() =>
-                                      handleInfoClick("input", "bmi")
+                                      handleInfoClick("input", "uACR")
                                     }
-                                  />{" "}
+                                  />
                                   <CompactInputField
-                                    label="HbA1c (optional)"
+                                    label="HbA1c"
                                     name="a1c"
                                     value={formState.a1c}
                                     onChange={handleInputChange}
                                     onBlur={handleInputBlur}
-                                    unit="%"
+                                    unit="% (optional)"
                                     error={validationErrors.a1c}
                                     onInfoClick={() =>
                                       handleInfoClick("input", "bmi")
                                     }
-                                  />{" "}
-                                </div>{" "}
-                                <div className="grid grid-cols-1 gap-3 mb-1">
+                                  />
                                   <div>
                                     <label className="flex items-center text-xs font-medium text-gray-700 mb-1">
                                       ZIP Code{" "}
                                       <span className="text-gray-400 ml-1 text-xs">
-                                        (optional – for SDI deprivation index)
+                                        (optional–for SDI)
                                       </span>
                                       <InfoButton
                                         onClick={() =>
@@ -3360,11 +3576,12 @@ const ClinicalRiskCalculator = () => {
                                         formState.zipCode.padStart(5, "0")
                                       ] && (
                                         <p className="text-xs text-yellow-700 mt-1">
-                                          ZIP code not found in SDI lookup
+                                          ZIP not found in SDI lookup
                                         </p>
                                       )}
                                   </div>
-                                </div>
+                                </div>{" "}
+                                {/* ── Row 4: Toggles ── */}
                                 <div className="grid grid-cols-4 gap-3">
                                   {" "}
                                   <ToggleButton
@@ -3481,7 +3698,7 @@ const ClinicalRiskCalculator = () => {
                     {activeTab === "krfe" && (
                       <>
                         <Droplets className="w-5 h-5 mr-2 text-purple-600" />
-                        KRFE Results{" "}
+                        KFRE Results{" "}
                         <InfoButton
                           onClick={() => handleInfoClick("output", "krfe")}
                         />
