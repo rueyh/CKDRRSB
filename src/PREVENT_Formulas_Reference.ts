@@ -1,342 +1,52 @@
-const preventFormulasRaw = `================================================================================
-PREVENT EQUATION FORMULAS USED IN THIS DIGITAL TOOL
-Reference: Khan et al., Circulation 2023 (DOI: 10.1161/CIRCULATIONAHA.123.067626)
-        Supplemental Tables S12A–S12E
-================================================================================
+// PREVENT_Formulas_Reference.ts
+// Formula reference for the PREVENT equations used in this tool, covering
+// both the 10-year models (Tables S12A-E) and the 30-year models
+// (Tables S12F-J). Structured as tabs so the reference modal can let users
+// flip between models instead of scrolling one long document.
+// Reference: Khan et al., Circulation 2023 (DOI: 10.1161/CIRCULATIONAHA.123.067626)
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 1 — OVERVIEW & MODEL ROUTING
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export interface FormulaTab {
+  id: string;
+  label: string;
+  content: string;
+}
 
-The PREVENT simplified equations estimate 10-year risk for three outcomes:
-  • Total CVD      (cardiovascular disease — any)
-  • ASCVD          (atherosclerotic CVD: MI, fatal CHD, stroke)
-  • Heart Failure  (HF)
+const preventFormulaTabs: FormulaTab[] = [
+  {
+    "id": "overview",
+    "label": "Overview & Routing",
+    "content": "\n================================================================================\nPREVENT EQUATION FORMULAS USED IN THIS DIGITAL TOOL\nReference: Khan et al., Circulation 2023 (DOI: 10.1161/CIRCULATIONAHA.123.067626)\n        Supplemental Tables S12A–S12J (10-year: A–E, 30-year: F–J)\n================================================================================\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nMODEL ROUTING — SAME LOGIC FOR 10-YEAR AND 30-YEAR\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nThis app estimates both 10-year and 30-year risk for three outcomes:\n  • Total CVD      (cardiovascular disease — any)\n  • ASCVD          (atherosclerotic CVD: MI, fatal CHD, stroke)\n  • Heart Failure  (HF)\n\nThree optional enhanced variables can be entered:\n  1. uACR   — urinary albumin-creatinine ratio (mg/g)\n  2. HbA1c  — glycated haemoglobin (%)\n  3. ZIP code → SDI decile (Social Deprivation Index via ZCTA5 lookup)\n\nThe SAME routing rule is applied independently to whichever time horizon\n(10-year or 30-year) you have toggled on screen:\n\n  ┌─────────────────────────────────────┬────────────────────────────────────────────┐\n  │ Optional variables provided  │ 10-Year Model              │ 30-Year Model              │\n  ├─────────────────────────────────────┼────────────────────────────────────────────┤\n  │ None (0 of 3)                │ BASE (S12A)                │ BASE (S12F)                │\n  │ uACR only (1 of 3)           │ Enhanced ACR (S12B)        │ Enhanced ACR (S12G)        │\n  │ HbA1c only (1 of 3)          │ Enhanced A1c (S12C)        │ Enhanced A1c (S12H)        │\n  │ SDI/ZIP only (1 of 3)        │ Enhanced SDI (S12D)        │ Enhanced SDI (S12I)        │\n  │ Any 2 of 3                   │ FULL (S12E) + missing ind. │ FULL (S12J) + missing ind. │\n  │ All 3 of 3                   │ FULL (S12E)                │ FULL (S12J)                │\n  └─────────────────────────────────────┴────────────────────────────────────────────┘\n\nWhen the FULL model (S12E / S12J) is used with only 2 of 3 optional\nvariables, the absent variable's published \"Missing\" indicator\ncoefficient is added to the log-odds instead of its real term. Per the\nTable S12E footnote (identical wording applies to S12J):\n  \"The regression allows for missing values in ACR, HbA1C, or SDI\n   while the excel calculation above is limited to non-missing data.\"\n\nFinal risk for all models, both time horizons:\n  Risk = exp(log-odds) / (1 + exp(log-odds))    [inverse logit]\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nDERIVED / SPLINE TERMS (identical across all models, both horizons)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n  age_t        = (age − 55) / 10\n  nonHDLC_t    = (TC − HDL-C) × 0.02586 − 3.5        [mg/dL → mmol/L]\n  HDLC_t       = (HDL-C × 0.02586 − 1.3) / 0.3\n  sbpLow_t     = (min(SBP, 110) − 110) / 20           [spline knot at 110; ≤ 0]\n  sbpHigh_t    = (max(SBP, 110) − 130) / 20           [centered at 130]\n  bmiLow_t     = (min(BMI, 30) − 25) / 5              [HF only; spline knot at 30]\n  bmiHigh_t    = (max(BMI, 30) − 30) / 5              [HF only]\n  egfrLow_t    = (min(eGFR, 60) − 60) / −15           [knot at 60; ≥ 0 when eGFR < 60]\n  egfrHigh_t   = (max(eGFR, 60) − 90) / −15           [= 0 at 90; > 0 in 60–90; < 0 above 90]\n  age_t²       = age_t × age_t                       [30-YEAR MODELS ONLY — F,G,H,I,J]\n\n  Binary variables (0 or 1):\n    dm       = 1 if diabetes\n    smk      = 1 if current smoker\n    antihtn  = 1 if on antihypertensive medication\n    statin   = 1 if on statin\n\n  Interaction terms:\n    int_treatSBP   = sbpHigh_t  × antihtn\n    int_treatChol  = nonHDLC_t  × statin\n    int_ageChol    = age_t      × nonHDLC_t\n    int_ageHDL     = age_t      × HDLC_t\n    int_ageSBP     = age_t      × sbpHigh_t\n    int_ageDM      = age_t      × dm\n    int_ageSmk     = age_t      × smk\n    int_ageBMI     = age_t      × bmiHigh_t    [HF only]\n    int_ageEGFR    = age_t      × egfrLow_t\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nGENERIC LOG-ODDS FORMULA STRUCTURE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nAll models share the same structural formula; only the coefficients (and,\nat 30 years, the extra age² term) differ.\n\n  log-odds =\n      constant\n    + β_age          × age_t\n    + β_age²         × age_t²          [30-YEAR MODELS ONLY]\n    + β_nonHDLC      × nonHDLC_t         [0 for HF in all models]\n    + β_HDLC         × HDLC_t            [0 for HF in all models]\n    + β_sbpLow       × sbpLow_t\n    + β_sbpHigh      × sbpHigh_t\n    + β_dm           × dm\n    + β_smk           × smk\n    + β_bmiLow       × bmiLow_t          [HF only]\n    + β_bmiHigh      × bmiHigh_t         [HF only]\n    + β_egfrLow      × egfrLow_t\n    + β_egfrHigh     × egfrHigh_t\n    + β_antihtn      × antihtn\n    + β_statin       × statin            [0 for HF in all models]\n    + β_treatSBP     × int_treatSBP\n    + β_treatChol    × int_treatChol     [0 for HF in all models]\n    + β_ageChol      × int_ageChol       [0 for HF in all models]\n    + β_ageHDL       × int_ageHDL        [0 for HF in all models]\n    + β_ageSBP       × int_ageSBP\n    + β_ageDM        × int_ageDM\n    + β_ageSmk       × int_ageSmk\n    + β_ageBMI       × int_ageBMI        [HF only]\n    + β_ageEGFR      × int_ageEGFR\n    [+ novel-variable terms, model-dependent — see the model-specific tabs]\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNOVEL VARIABLE ADDITIONS BY MODEL (same structure at 10yr and 30yr)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nBase model (S12A / S12F): no novel-variable terms.\n\nEnhanced ACR model (S12B / S12G):\n  + β_lnACR × ln(UACR [mg/g])\n\nEnhanced A1c model (S12C / S12H):\n  + β_a1cDM   × (HbA1c − 5.3) × dm\n  + β_a1cNoDM × (HbA1c − 5.3) × (1 − dm)\n\nEnhanced SDI model (S12D / S12I):\n  + β_sdiMid  × [SDI decile 4–6 ? 1 : 0]\n  + β_sdiHigh × [SDI decile ≥7  ? 1 : 0]\n  (reference = deciles 1–3; both terms = 0)\n\nFull model (S12E / S12J) — one of each pair below per optional variable:\n  uACR  present: + β_lnACR × ln(UACR)\n  uACR  absent:  + β_missingACR\n  HbA1c present: + β_a1cDM × (HbA1c−5.3)×dm + β_a1cNoDM × (HbA1c−5.3)×(1−dm)\n  HbA1c absent:  + β_missingA1c\n  SDI   present: + β_sdiMid × sdiMid + β_sdiHigh × sdiHigh\n  SDI   absent:  + β_missingSDI\n\n  SDI decile lookup:\n    ZIP code (ZCTA5) → SDI score (0–100) → decile = ceil(score/10), clamped [1,10]\n    Source: RWJF / Dartmouth Atlas 2015–2019 (zipSdiDecile.json, 32,370 ZCTAs)\n"
+  },
+  {
+    "id": "base",
+    "label": "Base (A / F)",
+    "content": "\n══════════════════════════════════════════════════════════════════\n10-YEAR — BASE MODEL (Table S12A)\n══════════════════════════════════════════════════════════════════\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.7939329    0.7688528     0.719883    0.7099847    0.8998235    0.8972642\nβ_nonHDLC       :   0.0305239    0.0736174    0.1176967    0.1658663            0            0\nβ_HDLC          :  -0.1606857   -0.0954431    -0.151185   -0.1144285            0            0\nβ_sbpLow        :  -0.2394003   -0.4347345   -0.0835358   -0.2837212   -0.4559771   -0.6811466\nβ_sbpHigh       :   0.3600781    0.3362658    0.3592852    0.3239977    0.3576505    0.3634461\nβ_dm            :   0.8667604    0.7692857    0.8348585    0.7189597     1.038346     0.923776\nβ_smk           :   0.5360739    0.4386871    0.4831078    0.3956973     0.583916    0.5023736\nβ_bmiLow        :           0            0            0            0   -0.0072294   -0.0485841\nβ_bmiHigh       :           0            0            0            0    0.2997706    0.3726929\nβ_egfrLow       :   0.6045917    0.5378979    0.4864619    0.3690075    0.7451638    0.6926917\nβ_egfrHigh      :   0.0433769    0.0164827    0.0397779    0.0203619    0.0557087    0.0251827\nβ_antihtn       :   0.3151672     0.288879    0.2265309    0.2036522    0.3534442    0.2980922\nβ_statin        :  -0.1477655   -0.1337349   -0.0592374   -0.0865581            0            0\nβ_treatSBP      :  -0.0663612   -0.0475924   -0.0395762   -0.0322916   -0.0981511   -0.0497731\nβ_treatChol     :   0.1197879     0.150273    0.0844423     0.114563            0            0\nβ_ageChol       :  -0.0819715   -0.0517874   -0.0567839   -0.0300005            0            0\nβ_ageHDL        :   0.0306769    0.0191169    0.0325692    0.0232747            0            0\nβ_ageSBP        :  -0.0946348   -0.1049477   -0.1035985   -0.0927024   -0.0946663   -0.1289201\nβ_ageDM         :    -0.27057   -0.2251948   -0.2417542   -0.2018525   -0.3581041   -0.3040924\nβ_ageSmk        :   -0.078715   -0.0895067   -0.0791142   -0.0970527   -0.1159453   -0.1401688\nβ_ageBMI        :           0            0            0            0    -0.003878    0.0068126\nβ_ageEGFR       :  -0.1637806   -0.1543702   -0.1671492   -0.1217081   -0.1884289   -0.1797778\nconstant        :   -3.307728    -3.031168    -3.819975    -3.500655    -4.310409    -3.946391\n\n\n══════════════════════════════════════════════════════════════════\n30-YEAR — BASE MODEL (Table S12F)\n══════════════════════════════════════════════════════════════════\nNOTE: the 30-year models add one extra term not present at 10 years:\n  β_age² × age_t²   (age_t² = age_t × age_t)\nThis captures curvature in how age drives risk over a longer horizon.\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.5503079    0.4627309    0.4669202    0.3994099    0.6254374    0.5681541\nβ_age²          :  -0.0928369   -0.0984281   -0.0893118   -0.0937484   -0.0983038   -0.1048388\nβ_nonHDLC       :   0.0409794    0.0836088    0.1256901    0.1744643            0            0\nβ_HDLC          :  -0.1663306   -0.1029824   -0.1542255    -0.120203            0            0\nβ_sbpLow        :  -0.1628654   -0.2140352   -0.0018093   -0.0665117   -0.3919241   -0.4761564\nβ_sbpHigh       :   0.3299505    0.2904325     0.322949    0.2753037    0.3142295      0.30324\nβ_dm            :   0.6793894    0.5331276    0.6296707    0.4790257    0.8330787    0.6840338\nβ_smk           :   0.3196112    0.2141914     0.268292    0.1782635    0.3438651    0.2656273\nβ_bmiLow        :           0            0            0            0    0.0594874    0.0833107\nβ_bmiHigh       :           0            0            0            0    0.2525536      0.26999\nβ_egfrLow       :   0.1857101    0.1155556     0.100106   -0.0218789    0.2981642    0.2541805\nβ_egfrHigh      :   0.0553528    0.0603775    0.0499663    0.0602553    0.0667159    0.0638923\nβ_antihtn       :      0.2894     0.232714    0.1875292    0.1421182     0.333921    0.2583631\nβ_statin        :   -0.075688   -0.0272112    0.0152476    0.0135996            0            0\nβ_treatSBP      :   -0.056367   -0.0384488   -0.0276123   -0.0218265   -0.0893177   -0.0391938\nβ_treatChol     :   0.1071019     0.134192    0.0736147    0.1013148            0            0\nβ_ageChol       :  -0.0751438   -0.0511759   -0.0521962   -0.0312619            0            0\nβ_ageHDL        :   0.0301786    0.0165865    0.0316918     0.020673            0            0\nβ_ageSBP        :  -0.0998776   -0.1101437   -0.1046101   -0.0920935   -0.0974299   -0.1269124\nβ_ageDM         :  -0.3206166   -0.2585943   -0.2727793   -0.2159947    -0.404855   -0.3273572\nβ_ageSmk        :  -0.1607862   -0.1566406   -0.1530907   -0.1548811   -0.1982991   -0.2043019\nβ_ageBMI        :           0            0            0            0   -0.0035619   -0.0182831\nβ_ageEGFR       :  -0.1450788   -0.1166776   -0.1299149   -0.0712547   -0.1564215   -0.1342618\nconstant        :   -1.318827    -1.148204    -1.974074    -1.736444    -2.205379     -1.95751\n\n"
+  },
+  {
+    "id": "acr",
+    "label": "ACR (B / G)",
+    "content": "\n══════════════════════════════════════════════════════════════════\n10-YEAR — ENHANCED ACR MODEL (Table S12B)\n══════════════════════════════════════════════════════════════════\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.7969249    0.7768655    0.7201999    0.7141718    0.9145975    0.9111795\nβ_nonHDLC       :   0.0256635    0.0659949    0.1135771    0.1602194            0            0\nβ_HDLC          :  -0.1588107   -0.0951111   -0.1493506   -0.1139086            0            0\nβ_sbpLow        :  -0.2255701    -0.420667   -0.0726677   -0.2719456   -0.4441346   -0.6693649\nβ_sbpHigh       :   0.3396649    0.3120151    0.3436259    0.3058719    0.3260323    0.3290082\nβ_dm            :   0.8047515     0.698521    0.7773094    0.6600631    0.9611365    0.8377655\nβ_smk           :   0.5285338    0.4314669    0.4746662    0.3884022    0.5755787    0.4978917\nβ_bmiLow        :           0            0            0            0    0.0008831    -0.042749\nβ_bmiHigh       :           0            0            0            0    0.2988964    0.3624165\nβ_egfrLow       :   0.4803511    0.3841364    0.3824646    0.2466316    0.5915291    0.5075796\nβ_egfrHigh      :   0.0434472     0.009384    0.0394178    0.0151852    0.0556823    0.0137716\nβ_antihtn       :   0.2985207    0.2676494    0.2125182     0.186167    0.3314097    0.2739963\nβ_statin        :  -0.1497787   -0.1390966   -0.0603046   -0.0894395            0            0\nβ_treatSBP      :  -0.0742889   -0.0579315   -0.0466053   -0.0411884   -0.1078596   -0.0645712\nβ_treatChol     :    0.106756    0.1383719    0.0733118    0.1058212            0            0\nβ_ageChol       :  -0.0778126   -0.0488332   -0.0534262    -0.028089            0            0\nβ_ageHDL        :   0.0306768    0.0200406    0.0325689    0.0240427            0            0\nβ_ageSBP        :  -0.0907168    -0.102454   -0.0999887   -0.0912325   -0.0875231   -0.1230039\nβ_ageDM         :  -0.2705122   -0.2236355   -0.2411762   -0.2004894    -0.356859   -0.3013297\nβ_ageSmk        :  -0.0830564    -0.089485   -0.0826941    -0.096936   -0.1220248   -0.1410318\nβ_ageBMI        :           0            0            0            0   -0.0053637    0.0021531\nβ_ageEGFR       :  -0.1389249   -0.1321848   -0.1444737   -0.1022867   -0.1610389   -0.1548018\nconstant        :   -3.738341    -3.510705    -4.174614     -3.85146    -4.841506    -4.556907\nβ_lnACR       :    0.1793037    0.1887974    0.1501217    0.1510073    0.2197281    0.2306299\n\n══════════════════════════════════════════════════════════════════\n30-YEAR — ENHANCED ACR MODEL (Table S12G)\n══════════════════════════════════════════════════════════════════\nNOTE: the 30-year models add one extra term not present at 10 years:\n  β_age² × age_t²   (age_t² = age_t × age_t)\nThis captures curvature in how age drives risk over a longer horizon.\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.5491768     0.464491    0.4629669    0.3995607    0.6319513    0.5750236\nβ_age²          :  -0.0937311   -0.0998895   -0.0902777    -0.094557   -0.1009284   -0.1062268\nβ_nonHDLC       :   0.0359847    0.0757606    0.1215214    0.1686692            0            0\nβ_HDLC          :  -0.1642965   -0.1031778   -0.1522069   -0.1202145            0            0\nβ_sbpLow        :  -0.1483404   -0.1990714    0.0092679   -0.0555561   -0.3787175   -0.4633994\nβ_sbpHigh       :    0.313353    0.2715816    0.3113609    0.2633566    0.2863393    0.2742874\nβ_dm            :   0.6253766    0.4754637     0.581256    0.4362036    0.7631221     0.612208\nβ_smk           :   0.3147172    0.2069672     0.263167    0.1716233    0.3355843    0.2614987\nβ_bmiLow        :           0            0            0            0    0.0677084    0.0895459\nβ_bmiHigh       :           0            0            0            0    0.2517238    0.2632424\nβ_egfrLow       :   0.1094663    0.0331103    0.0391726   -0.0775282    0.1940067    0.1430472\nβ_egfrHigh      :   0.0550705    0.0540474    0.0492959    0.0561236    0.0664006    0.0535184\nβ_antihtn       :   0.2782433    0.2189911    0.1786178    0.1319331    0.3171436    0.2417468\nβ_statin        :  -0.0786239   -0.0331044    0.0131058    0.0102428            0            0\nβ_treatSBP      :  -0.0628947     -0.04534   -0.0325135   -0.0269294   -0.0970661   -0.0498574\nβ_treatChol     :    0.093204    0.1214535    0.0617093    0.0920557            0            0\nβ_ageChol       :  -0.0710685   -0.0483995   -0.0489189   -0.0297021            0            0\nβ_ageHDL        :   0.0306363    0.0178997    0.0321079    0.0217935            0            0\nβ_ageSBP        :  -0.0951455   -0.1059324   -0.1003185   -0.0893347   -0.0896239   -0.1193827\nβ_ageDM         :  -0.3168231   -0.2492861   -0.2684574   -0.2081467    -0.400743    -0.316651\nβ_ageSmk        :  -0.1636391   -0.1561543   -0.1547301   -0.1542716   -0.2042041   -0.2046122\nβ_ageBMI        :           0            0            0            0   -0.0054699   -0.0216878\nβ_ageEGFR       :  -0.1265483   -0.1012429   -0.1130703   -0.0597254     -0.13602   -0.1165637\nconstant        :   -1.583738    -1.398727    -2.178888    -1.873449    -2.538952    -2.314872\nβ_lnACR       :    0.1142251    0.1007571    0.0903471    0.0684872    0.1486028    0.1366452\nβ_missingACR  :   -0.0055863    0.0572456   -0.0145818    0.0193962     0.011608    0.1078355\n  (Table S12G also publishes a \"Missing ACR\" row, unlike its 10-year\n   counterpart S12B. This model is only invoked when ACR IS the one\n   variable supplied, so that row is not exercised by the app's own\n   routing — it would only matter if a caller used S12G with ACR absent,\n   which is instead handled by the Full model S12J.)\n"
+  },
+  {
+    "id": "a1c",
+    "label": "A1c (C / H)",
+    "content": "\n══════════════════════════════════════════════════════════════════\n10-YEAR — ENHANCED A1c MODEL (Table S12C)\n══════════════════════════════════════════════════════════════════\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.7858178    0.7699177    0.7111831    0.7064146    0.8997391     0.911787\nβ_nonHDLC       :   0.0194438    0.0605093     0.106797    0.1532267            0            0\nβ_HDLC          :  -0.1521964   -0.0888525   -0.1425745   -0.1082166            0            0\nβ_sbpLow        :  -0.2296681    -0.417713   -0.0736824   -0.2675288   -0.4422749   -0.6568071\nβ_sbpHigh       :   0.3465777    0.3288657    0.3480844    0.3173809    0.3378691    0.3524645\nβ_dm            :   0.5366241    0.4759471    0.5112951     0.432604     0.681284    0.5849752\nβ_smk           :   0.5411682    0.4385663    0.4880292    0.3958842    0.5886005    0.5014014\nβ_bmiLow        :           0            0            0            0   -0.0148657   -0.0512352\nβ_bmiHigh       :           0            0            0            0    0.2958374     0.365294\nβ_egfrLow       :   0.5931898    0.5334616    0.4754997    0.3665014      0.73447    0.6892219\nβ_egfrHigh      :   0.0472458    0.0206431    0.0438132    0.0250243      0.05926    0.0292377\nβ_antihtn       :   0.3158567    0.2917524    0.2259093    0.2061158    0.3543475    0.3038296\nβ_statin        :  -0.1535174   -0.1383313   -0.0648872   -0.0899988            0            0\nβ_treatSBP      :  -0.0687752   -0.0482622   -0.0437645   -0.0334959   -0.1002139   -0.0515032\nβ_treatChol     :   0.1054746    0.1393796    0.0697082    0.1034168            0            0\nβ_ageChol       :  -0.0761119   -0.0463501   -0.0506382   -0.0255406            0            0\nβ_ageHDL        :   0.0307469    0.0205926    0.0327475    0.0247538            0            0\nβ_ageSBP        :  -0.0905966   -0.1037717   -0.0996442   -0.0917441   -0.0878765   -0.1262343\nβ_ageDM         :  -0.2241857   -0.1737697   -0.1924338   -0.1499195    -0.303684   -0.2449514\nβ_ageSmk        :   -0.080186   -0.0915839   -0.0803539    -0.098089   -0.1178943   -0.1392217\nβ_ageBMI        :           0            0            0            0    -0.008345    0.0009592\nβ_ageEGFR       :  -0.1667286   -0.1637039   -0.1682586   -0.1305231   -0.1912183   -0.1917105\nconstant        :   -3.306162    -3.040901    -3.838746     -3.51835    -4.288225    -3.961954\nβ_a1cDM       :    0.1338348      0.13159    0.1339055    0.1157161    0.1856442    0.1652857\nβ_a1cNoDM     :    0.1622409    0.1295185    0.1596461    0.1288303    0.1833083    0.1505859\n\n══════════════════════════════════════════════════════════════════\n30-YEAR — ENHANCED A1c MODEL (Table S12H)\n══════════════════════════════════════════════════════════════════\nNOTE: the 30-year models add one extra term not present at 10 years:\n  β_age² × age_t²   (age_t² = age_t × age_t)\nThis captures curvature in how age drives risk over a longer horizon.\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.5343493    0.4519873    0.4555574    0.3883267    0.6210856    0.5703729\nβ_age²          :  -0.0952314    -0.101624   -0.0903501   -0.0958114   -0.1000972   -0.1084544\nβ_nonHDLC       :   0.0298124    0.0700456    0.1148321    0.1613374            0            0\nβ_HDLC          :  -0.1578451   -0.0968005   -0.1458754   -0.1144418            0            0\nβ_sbpLow        :  -0.1504488   -0.1923527    0.0089323   -0.0474338   -0.3773697   -0.4471767\nβ_sbpHigh       :   0.3173368    0.2827043    0.3139029    0.2691281     0.295316    0.2910152\nβ_dm            :   0.4314738    0.3417152     0.386281    0.2859773    0.5681692    0.4507242\nβ_smk           :   0.3209399    0.2105272    0.2714309    0.1759553    0.3449139     0.259585\nβ_bmiLow        :           0            0            0            0    0.0540094    0.0850676\nβ_bmiHigh       :           0            0            0            0     0.249767    0.2637222\nβ_egfrLow       :   0.1771435    0.1113291    0.0930987   -0.0242898    0.2875781    0.2454706\nβ_egfrHigh      :   0.0582828    0.0640135    0.0532216    0.0644523    0.0692013    0.0675649\nβ_antihtn       :   0.2888947    0.2334248    0.1862181     0.142874    0.3334936    0.2611991\nβ_statin        :  -0.0795886   -0.0299421    0.0106964    0.0115062            0            0\nβ_treatSBP      :  -0.0600438   -0.0393204   -0.0329713     -0.02333   -0.0922339   -0.0408908\nβ_treatChol     :   0.0920598    0.1228854    0.0583609    0.0899664            0            0\nβ_ageChol       :  -0.0696108   -0.0463737   -0.0463273   -0.0275478            0            0\nβ_ageHDL        :   0.0308807    0.0184599    0.0324717     0.022573            0            0\nβ_ageSBP        :  -0.0954051   -0.1085744   -0.1004777    -0.090802   -0.0907885   -0.1241051\nβ_ageDM         :  -0.2763408   -0.2208049   -0.2266944   -0.1771894   -0.3554646   -0.2849461\nβ_ageSmk        :  -0.1623944   -0.1577978   -0.1541859   -0.1548847   -0.2008846   -0.2032308\nβ_ageBMI        :           0            0            0            0   -0.0079611   -0.0239714\nβ_ageEGFR       :  -0.1430514   -0.1179375   -0.1286005   -0.0732754    -0.156803    -0.138301\nconstant        :   -1.341059    -1.180767    -2.011533    -1.777708    -2.193553    -1.974999\nβ_a1cDM       :    0.0940543    0.0768169    0.0875827    0.0591089    0.1448336    0.1101184\nβ_a1cNoDM     :    0.1116486    0.0777295    0.1126417    0.0821158    0.1277838    0.0949198\nβ_missingA1c  :   -0.0024798    0.0092204    0.0124356    0.0179755   -0.0022589    0.0084192\n"
+  },
+  {
+    "id": "sdi",
+    "label": "SDI (D / I)",
+    "content": "\n══════════════════════════════════════════════════════════════════\n10-YEAR — ENHANCED SDI MODEL (Table S12D)\n══════════════════════════════════════════════════════════════════\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.7754083    0.7756377    0.7028123    0.7150087    0.8819156     0.894179\nβ_nonHDLC       :   0.0221756    0.0715325    0.1056078    0.1627339            0            0\nβ_HDLC          :  -0.1650828   -0.0976775   -0.1502263   -0.1194988            0            0\nβ_sbpLow        :  -0.2180808   -0.5186614   -0.0488757    -0.363659   -0.4495491   -0.7067398\nβ_sbpHigh       :   0.3381188    0.3235653    0.3402681    0.3179476    0.3457405     0.350241\nβ_dm            :   0.8624372    0.7722496     0.838022    0.7156422      1.02632    0.9252453\nβ_smk           :   0.4663953    0.3761129    0.4064592    0.3404477    0.5371646    0.4364765\nβ_bmiLow        :           0            0            0            0   -0.0168447   -0.0866297\nβ_bmiHigh       :           0            0            0            0    0.2805126    0.3706765\nβ_egfrLow       :   0.5919004    0.5180893    0.4838394    0.3545754    0.7315223    0.6696768\nβ_egfrHigh      :   0.0516821    0.0118451    0.0480415    0.0157875    0.0651679    0.0237374\nβ_antihtn       :   0.3182166    0.2634094    0.2270648    0.1786233    0.3491487    0.2688352\nβ_statin        :  -0.1460816   -0.1455263   -0.0585626   -0.1018269            0            0\nβ_treatSBP      :  -0.0574455   -0.0367013   -0.0349485    -0.028313   -0.0890335   -0.0434892\nβ_treatChol     :   0.1302287    0.1617785    0.1017299    0.1209467            0            0\nβ_ageChol       :   -0.083509   -0.0507669    -0.062389   -0.0285806            0            0\nβ_ageHDL        :   0.0282181    0.0178356    0.0285106    0.0247348            0            0\nβ_ageSBP        :  -0.0952647   -0.1059337   -0.1033711   -0.0919494   -0.0971028   -0.1297155\nβ_ageDM         :  -0.2718966   -0.2236755   -0.2477845   -0.1981491   -0.3528078    -0.299086\nβ_ageSmk        :  -0.0641738   -0.0723216   -0.0544326   -0.0776891    -0.106216   -0.1079522\nβ_ageBMI        :           0            0            0            0    0.0064998    0.0130483\nβ_ageEGFR       :  -0.1717026   -0.1548205   -0.1735372   -0.1284899   -0.1899413   -0.1797791\nconstant        :   -3.461564    -3.159572    -3.955898    -3.624712    -4.409382    -4.058977\nβ_sdiMid      :    0.1442776    0.0889119    0.1473705    0.0728242    0.1343318    0.1235632\nβ_sdiHigh     :    0.2421409     0.291897    0.2451878    0.2824453    0.2496522    0.3592212\n\n══════════════════════════════════════════════════════════════════\n30-YEAR — ENHANCED SDI MODEL (Table S12I)\n══════════════════════════════════════════════════════════════════\nNOTE: the 30-year models add one extra term not present at 10 years:\n  β_age² × age_t²   (age_t² = age_t × age_t)\nThis captures curvature in how age drives risk over a longer horizon.\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.5124233     0.437377    0.4396545    0.3749788    0.5919097    0.5387527\nβ_age²          :  -0.0978159    -0.104443   -0.0918489   -0.0990063   -0.1023133   -0.1090333\nβ_nonHDLC       :   0.0322131    0.0812573    0.1132729    0.1708505            0            0\nβ_HDLC          :  -0.1717884   -0.1069199   -0.1544977   -0.1272841            0            0\nβ_sbpLow        :  -0.1364536   -0.2786727     0.036315   -0.1275555   -0.3864727   -0.4829094\nβ_sbpHigh       :   0.3074443    0.2729256    0.3049229    0.2659339     0.301876    0.2843569\nβ_dm            :   0.6709275    0.5279006    0.6344794    0.4676531    0.8162909    0.6827667\nβ_smk           :   0.2897728    0.1878949     0.234514    0.1610104    0.3449647    0.2406677\nβ_bmiLow        :           0            0            0            0    0.0574975    0.0618028\nβ_bmiHigh       :           0            0            0            0    0.2367826    0.2705615\nβ_egfrLow       :   0.1670658    0.0866569    0.0898312   -0.0465144    0.2790347    0.2255837\nβ_egfrHigh      :   0.0618439    0.0594948    0.0564502    0.0596996    0.0742645    0.0653632\nβ_antihtn       :   0.2969806    0.2028246    0.1933487    0.1147096    0.3352935    0.2263243\nβ_statin        :  -0.0665514   -0.0308404    0.0220467    0.0052906            0            0\nβ_treatSBP      :  -0.0458917   -0.0283679   -0.0229229   -0.0186687   -0.0772532   -0.0316851\nβ_treatChol     :   0.1168505    0.1439353    0.0903326    0.1063151            0            0\nβ_ageChol       :  -0.0770419   -0.0510854   -0.0579383   -0.0307797            0            0\nβ_ageHDL        :    0.027634    0.0150236    0.0274011    0.0218126            0            0\nβ_ageSBP        :  -0.0992045   -0.1095448   -0.1039749   -0.0898242   -0.0995144   -0.1258716\nβ_ageDM         :  -0.3208137   -0.2561109   -0.2785102    -0.210054   -0.4000423   -0.3243709\nβ_ageSmk        :   -0.134847   -0.1282945   -0.1167267   -0.1246327   -0.1770335   -0.1596172\nβ_ageBMI        :           0            0            0            0    0.0083046   -0.0103092\nβ_ageEGFR       :  -0.1399842   -0.1011023   -0.1269382   -0.0629358    -0.149585   -0.1204785\nconstant        :   -1.493211    -1.251031    -2.116951    -1.836632    -2.317899    -2.060187\nβ_sdiMid      :    0.1129725    0.0314626    0.1149139    0.0199201    0.0960646    0.0680528\nβ_sdiHigh     :    0.1975843    0.2003953    0.1976537     0.194949    0.1987543    0.2619865\n"
+  },
+  {
+    "id": "full",
+    "label": "Full (E / J)",
+    "content": "\n══════════════════════════════════════════════════════════════════\n10-YEAR — FULL MODEL (all 3 novel variables, with missing-indicator terms) (Table S12E)\n══════════════════════════════════════════════════════════════════\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.7716794    0.7847578    0.7023067    0.7128741     0.884209    0.9095703\nβ_nonHDLC       :   0.0062109    0.0534485    0.0898765    0.1465201            0            0\nβ_HDLC          :  -0.1547756   -0.0911282   -0.1407316   -0.1125794            0            0\nβ_sbpLow        :  -0.1933123   -0.4921973   -0.0256648   -0.3387216    -0.421474   -0.6765184\nβ_sbpHigh       :   0.3071217    0.2972415     0.314511    0.2980252    0.3002919    0.3111651\nβ_dm            :    0.496753    0.4527054    0.4799217     0.399583    0.6170359    0.5535052\nβ_smk           :    0.466605    0.3726641    0.4062049    0.3379111    0.5380269    0.4326811\nβ_bmiLow        :           0            0            0            0   -0.0191335   -0.0854286\nβ_bmiHigh       :           0            0            0            0    0.2764302    0.3551736\nβ_egfrLow       :   0.4780697    0.3886854    0.3847744    0.2582604    0.5975847    0.5102245\nβ_egfrHigh      :   0.0529077    0.0081661    0.0495174    0.0147769    0.0654197     0.015472\nβ_antihtn       :   0.3034892    0.2508052    0.2133861    0.1686621    0.3313614    0.2570964\nβ_statin        :  -0.1556524   -0.1538484   -0.0678552   -0.1073619            0            0\nβ_treatSBP      :  -0.0667026   -0.0474695   -0.0451416   -0.0381038   -0.1002304   -0.0591177\nβ_treatChol     :   0.1061825    0.1415382    0.0788187    0.1034169            0            0\nβ_ageChol       :  -0.0742271   -0.0436455   -0.0535985   -0.0228755            0            0\nβ_ageHDL        :   0.0288245    0.0199549    0.0291762    0.0267453            0            0\nβ_ageSBP        :  -0.0875188   -0.1022686   -0.0961839   -0.0897449   -0.0845363   -0.1219056\nβ_ageDM         :  -0.2267102   -0.1762507   -0.2001466   -0.1497464   -0.2989062   -0.2437577\nβ_ageSmk        :  -0.0676125   -0.0715873   -0.0586472    -0.077206   -0.1111354    -0.105363\nβ_ageBMI        :           0            0            0            0    0.0008104    0.0037907\nβ_ageEGFR       :  -0.1493231   -0.1428668   -0.1537791   -0.1198368   -0.1666635   -0.1660207\nconstant        :   -3.860385    -3.631387    -4.291503    -3.969788    -4.896524    -4.663513\nβ_lnACR       :    0.1645922    0.1772853    0.1371824    0.1375837    0.1948135    0.2164607\nβ_missingACR  :    0.0198413    0.1095674    0.0061613    0.0652944    0.0395368    0.1702805\nβ_a1cDM       :    0.1298513    0.1165698     0.123192     0.101282     0.176668     0.148297\nβ_a1cNoDM     :    0.1412555    0.1048297    0.1410572    0.1092726    0.1614911    0.1234088\nβ_missingA1c  :   -0.0031658   -0.0230072     0.005866   -0.0112852   -0.0010583   -0.0234637\nβ_sdiMid      :    0.1361989    0.0802431    0.1413965    0.0651121    0.1213034    0.1106372\nβ_sdiHigh     :    0.2261596     0.275073     0.228136    0.2676683    0.2314147    0.3371204\nβ_missingSDI  :    0.1804508     0.144759    0.1588908    0.1388492    0.1819138    0.1694628\n\n══════════════════════════════════════════════════════════════════\n30-YEAR — FULL MODEL (all 3 novel variables, with missing-indicator terms) (Table S12J)\n══════════════════════════════════════════════════════════════════\nNOTE: the 30-year models add one extra term not present at 10 years:\n  β_age² × age_t²   (age_t² = age_t × age_t)\nThis captures curvature in how age drives risk over a longer horizon.\n\nColumn layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]\n\nβ_age           :   0.5073749    0.4427595    0.4386739    0.3743566    0.5927507    0.5478829\nβ_age²          :  -0.0981751   -0.1064108   -0.0921956   -0.0995499   -0.1028754   -0.1111928\nβ_nonHDLC       :   0.0162303    0.0629381    0.0977728    0.1544808            0            0\nβ_HDLC          :  -0.1617147   -0.1015427   -0.1453525   -0.1215297            0            0\nβ_sbpLow        :  -0.1111241   -0.2542326    0.0590925   -0.1083968   -0.3593781   -0.4547346\nβ_sbpHigh       :    0.282946    0.2549679    0.2862862    0.2555179    0.2628556    0.2527602\nβ_dm            :   0.4004069     0.333835    0.3669136    0.2696998    0.5113472    0.4385384\nβ_smk           :   0.2918701    0.1873833    0.2354695    0.1628432     0.347344    0.2397952\nβ_bmiLow        :           0            0            0            0    0.0564656    0.0640931\nβ_bmiHigh       :           0            0            0            0    0.2363857    0.2643081\nβ_egfrLow       :   0.1017102    0.0246102    0.0354338    -0.077507    0.1971295    0.1354588\nβ_egfrHigh      :   0.0622643    0.0552014    0.0573093    0.0583407    0.0735227    0.0570689\nβ_antihtn       :   0.2872416    0.1979729    0.1840085    0.1120322    0.3219386     0.220666\nβ_statin        :  -0.0768135   -0.0407714    0.0117504   -0.0025063            0            0\nβ_treatSBP      :  -0.0557282   -0.0365522   -0.0331945   -0.0256116   -0.0880321   -0.0436769\nβ_treatChol     :   0.0917585    0.1232822    0.0664311    0.0886745            0            0\nβ_ageChol       :  -0.0679131   -0.0441334   -0.0492826   -0.0254507            0            0\nβ_ageHDL        :    0.029076    0.0177865    0.0288888    0.0244639            0            0\nβ_ageSBP        :  -0.0907755   -0.1046657   -0.0964709   -0.0869146   -0.0863132   -0.1168376\nβ_ageDM         :  -0.2702118   -0.2116113   -0.2279648    -0.165745   -0.3425359   -0.2730055\nβ_ageSmk        :  -0.1373216   -0.1277905    -0.120405   -0.1244714    -0.181405   -0.1573691\nβ_ageBMI        :           0            0            0            0    0.0031285   -0.0174998\nβ_ageEGFR       :  -0.1255864   -0.0955922   -0.1157635   -0.0624552   -0.1356989   -0.1128676\nconstant        :   -1.748475    -1.504558    -2.314066    -1.985368    -2.642208    -2.425439\nβ_lnACR       :    0.1028065    0.0894596    0.0810739    0.0560171    0.1273306    0.1233486\nβ_missingACR  :   -0.0006181    0.0710124   -0.0147785    0.0252244    0.0167008    0.1274796\nβ_a1cDM       :    0.0925285    0.0676202    0.0794709    0.0501422    0.1378342    0.0985062\nβ_a1cNoDM     :    0.0975598     0.063409    0.1002615    0.0722905    0.1138832    0.0804844\nβ_missingA1c  :    0.0101713    0.0038783     0.017301    0.0114945    0.0138979    0.0022806\nβ_sdiMid      :    0.1067741    0.0256704    0.1107632     0.015675    0.0847634     0.057746\nβ_sdiHigh     :    0.1853138    0.1887637    0.1840367    0.1864231      0.18397    0.2446441\nβ_missingSDI  :    0.1567115     0.089241    0.1308962    0.0845697    0.1485802    0.1076782\n"
+  },
+  {
+    "id": "examples",
+    "label": "Examples",
+    "content": "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nILLUSTRATIVE ROUTING EXAMPLES (identical logic, either time horizon)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n0 of 3 → BASE (S12A at 10yr / S12F at 30yr). No novel-variable terms.\n\nuACR only (1 of 3) → Enhanced ACR (S12B / S12G):\n  + B_lnACR × ln(UACR)          [10yr]      + G_lnACR × ln(UACR)          [30yr]\n\nHbA1c only (1 of 3) → Enhanced A1c (S12C / S12H):\n  + C_a1cDM × (HbA1c−5.3)×dm + C_a1cNoDM × (HbA1c−5.3)×(1−dm)   [10yr]\n  + H_a1cDM × (HbA1c−5.3)×dm + H_a1cNoDM × (HbA1c−5.3)×(1−dm)   [30yr]\n\nZIP/SDI only (1 of 3) → Enhanced SDI (S12D / S12I):\n  + D_sdiMid × sdiMid + D_sdiHigh × sdiHigh   [10yr]\n  + I_sdiMid × sdiMid + I_sdiHigh × sdiHigh   [30yr]\n\nuACR + HbA1c (2 of 3, SDI absent) → FULL (S12E / S12J):\n  + E_lnACR × ln(UACR)  +  E_a1cDM/E_a1cNoDM terms  +  E_missingSDI     [10yr]\n  + J_lnACR × ln(UACR)  +  J_a1cDM/J_a1cNoDM terms  +  J_missingSDI     [30yr]\n\nuACR + ZIP/SDI decile=5 (2 of 3, A1c absent) → FULL (S12E / S12J):\n  + E_lnACR × ln(UACR)  +  E_missingA1c  +  E_sdiMid × 1               [10yr]\n  + J_lnACR × ln(UACR)  +  J_missingA1c  +  J_sdiMid × 1               [30yr]\n\nHbA1c + ZIP/SDI decile=8 (2 of 3, ACR absent) → FULL (S12E / S12J):\n  + E_missingACR  +  E_a1cDM/E_a1cNoDM terms  +  E_sdiHigh × 1            [10yr]\n  + J_missingACR  +  J_a1cDM/J_a1cNoDM terms  +  J_sdiHigh × 1            [30yr]\n\nAll 3 provided → FULL (S12E / S12J), no missing indicators needed:\n  + lnACR term + a1cDM/a1cNoDM terms + sdiMid/sdiHigh terms\n  (identical structure at both horizons, only the coefficient table differs)\n\n================================================================================\nVerified against the official PREVENT_Equations_Base_ACR_A1c_SDI_10_And_30_Year.xlsx\nworked examples — every routing case (0, each 1-of-3, 2-of-3, 3-of-3) at both\n10-year and 30-year reproduces the published example outputs exactly.\n================================================================================\n"
+  }
+];
 
-Three optional enhanced variables can be entered:
-  1. uACR   — urinary albumin-creatinine ratio (mg/g)
-  2. HbA1c  — glycated haemoglobin (%)
-  3. ZIP code → SDI decile (Social Deprivation Index via ZCTA5 lookup)
-
-Model selection based on how many optional variables are provided:
-
-  ┌──────────────────────────────┬──────────────────────────────────────────┐
-  │ Optional variables provided  │ Model used                               │
-  ├──────────────────────────────┼──────────────────────────────────────────┤
-  │ None (0 of 3)                │ BASE        (Table S12A)                 │
-  │ uACR only (1 of 3)           │ Enhanced ACR (Table S12B)                │
-  │ HbA1c only (1 of 3)          │ Enhanced A1c (Table S12C)                │
-  │ SDI/ZIP only (1 of 3)        │ Enhanced SDI (Table S12D)                │
-  │ Any 2 of 3                   │ FULL (Table S12E) + missing indicators   │
-  │ All 3 of 3                   │ FULL (Table S12E)                        │
-  └──────────────────────────────┴──────────────────────────────────────────┘
-
-When the FULL model (S12E) is used with only 2 of 3 optional variables,
-the absent variable's published "Missing" indicator coefficient is added
-to the log-odds instead. Per the Table S12E footnote:
-  "The regression allows for missing values in ACR, HbA1C, or SDI
-   while the excel calculation above is limited to non-missing data."
-
-Final risk for all models:
-  Risk = exp(log-odds) / (1 + exp(log-odds))    [inverse logit]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 2 — DERIVED / SPLINE TERMS (identical across all models)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  age_t        = (age − 55) / 10
-  nonHDLC_t    = (TC − HDL-C) × 0.02586 − 3.5        [mg/dL → mmol/L]
-  HDLC_t       = (HDL-C × 0.02586 − 1.3) / 0.3
-  sbpLow_t     = (min(SBP, 110) − 110) / 20           [spline knot at 110; ≤ 0]
-  sbpHigh_t    = (max(SBP, 110) − 130) / 20           [centered at 130]
-  bmiLow_t     = (min(BMI, 30) − 25) / 5              [HF only; spline knot at 30]
-  bmiHigh_t    = (max(BMI, 30) − 30) / 5              [HF only]
-  egfrLow_t    = (min(eGFR, 60) − 60) / −15           [knot at 60; ≥ 0 when eGFR < 60]
-  egfrHigh_t   = (max(eGFR, 60) − 90) / −15           [= 0 at 90; > 0 in 60–90; < 0 above 90]
-
-  NOTE: denominators of eGFR splines are NEGATIVE (−15):
-    egfrLow_t  grows as eGFR falls below 60 (captures CKD effect)
-    egfrHigh_t = 0 exactly at eGFR = 90 (the model's centering value)
-
-  Binary variables (0 or 1):
-    dm       = 1 if diabetes
-    smk      = 1 if current smoker
-    antihtn  = 1 if on antihypertensive medication
-    statin   = 1 if on statin
-
-  Interaction terms:
-    int_treatSBP   = sbpHigh_t  × antihtn
-    int_treatChol  = nonHDLC_t  × statin
-    int_ageChol    = age_t      × nonHDLC_t
-    int_ageHDL     = age_t      × HDLC_t
-    int_ageSBP     = age_t      × sbpHigh_t
-    int_ageDM      = age_t      × dm
-    int_ageSmk     = age_t      × smk
-    int_ageBMI     = age_t      × bmiHigh_t    [HF only]
-    int_ageEGFR    = age_t      × egfrLow_t
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 3 — GENERIC LOG-ODDS FORMULA STRUCTURE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-All models share the same structural formula; only the coefficients differ.
-
-  log-odds =
-      constant
-    + β_age          × age_t
-    + β_nonHDLC      × nonHDLC_t         [0 for HF in all models]
-    + β_HDLC         × HDLC_t            [0 for HF in all models]
-    + β_sbpLow       × sbpLow_t
-    + β_sbpHigh      × sbpHigh_t
-    + β_dm           × dm
-    + β_smk          × smk
-    + β_bmiLow       × bmiLow_t          [HF only]
-    + β_bmiHigh      × bmiHigh_t         [HF only]
-    + β_egfrLow      × egfrLow_t
-    + β_egfrHigh     × egfrHigh_t
-    + β_antihtn      × antihtn
-    + β_statin       × statin            [0 for HF in all models]
-    + β_treatSBP     × int_treatSBP
-    + β_treatChol    × int_treatChol     [0 for HF in all models]
-    + β_ageChol      × int_ageChol       [0 for HF in all models]
-    + β_ageHDL       × int_ageHDL        [0 for HF in all models]
-    + β_ageSBP       × int_ageSBP
-    + β_ageDM        × int_ageDM
-    + β_ageSmk       × int_ageSmk
-    + β_ageBMI       × int_ageBMI        [HF only]
-    + β_ageEGFR      × int_ageEGFR
-    [+ novel-variable terms, model-dependent — see sections below]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 4 — NOVEL VARIABLE ADDITIONS BY MODEL
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Model B (Enhanced ACR, S12B):
-  + β_lnACR × ln(UACR [mg/g])
-
-Model C (Enhanced A1c, S12C):
-  + β_a1cDM   × (HbA1c − 5.3) × dm
-  + β_a1cNoDM × (HbA1c − 5.3) × (1 − dm)
-
-Model D (Enhanced SDI, S12D):
-  + β_sdiMid  × [SDI decile 4–6 ? 1 : 0]
-  + β_sdiHigh × [SDI decile ≥7  ? 1 : 0]
-  (reference = deciles 1–3; both terms = 0)
-
-Model E (Full, S12E) — one of each pair below per optional variable:
-  uACR  present: + β_lnACR × ln(UACR)
-  uACR  absent:  + β_missingACR
-  HbA1c present: + β_a1cDM × (HbA1c−5.3)×dm + β_a1cNoDM × (HbA1c−5.3)×(1−dm)
-  HbA1c absent:  + β_missingA1c
-  SDI   present: + β_sdiMid × sdiMid + β_sdiHigh × sdiHigh
-  SDI   absent:  + β_missingSDI
-
-  SDI decile lookup:
-    ZIP code (ZCTA5) → SDI score (0–100) → decile = ceil(score/10), clamped [1,10]
-    Source: RWJF / Dartmouth Atlas 2015–2019 (zipSdiDecile.json, 32,370 ZCTAs)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 5 — MODEL A: BASE COEFFICIENTS (Table S12A)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Column layout: [Women-CVD, Men-CVD, Women-ASCVD, Men-ASCVD, Women-HF, Men-HF]
-
-β_age          :  0.7939329   0.7688528   0.719883    0.7099847   0.8998235   0.8972642
-β_nonHDLC      :  0.0305239   0.0736174   0.1176967   0.1658663   0           0
-β_HDLC         : -0.1606857  -0.0954431  -0.151185   -0.1144285   0           0
-β_sbpLow       : -0.2394003  -0.4347345  -0.0835358  -0.2837212  -0.4559771  -0.6811466
-β_sbpHigh      :  0.3600781   0.3362658   0.3592852   0.3239977   0.3576505   0.3634461
-β_dm           :  0.8667604   0.7692857   0.8348585   0.7189597   1.038346    0.923776
-β_smk          :  0.5360739   0.4386871   0.4831078   0.3956973   0.583916    0.5023736
-β_bmiLow       :  0           0           0           0          -0.0072294  -0.0485841
-β_bmiHigh      :  0           0           0           0           0.2997706   0.3726929
-β_egfrLow      :  0.6045917   0.5378979   0.4864619   0.3690075   0.7451638   0.6926917
-β_egfrHigh     :  0.0433769   0.0164827   0.0397779   0.0203619   0.0557087   0.0251827
-β_antihtn      :  0.3151672   0.288879    0.2265309   0.2036522   0.3534442   0.2980922
-β_statin       : -0.1477655  -0.1337349  -0.0592374  -0.0865581   0           0
-β_treatSBP     : -0.0663612  -0.0475924  -0.0395762  -0.0322916  -0.0981511  -0.0497731
-β_treatChol    :  0.1197879   0.150273    0.0844423   0.114563     0           0
-β_ageChol      : -0.0819715  -0.0517874  -0.0567839  -0.0300005   0           0
-β_ageHDL       :  0.0306769   0.0191169   0.0325692   0.0232747   0           0
-β_ageSBP       : -0.0946348  -0.1049477  -0.1035985  -0.0927024  -0.0946663  -0.1289201
-β_ageDM        : -0.27057    -0.2251948  -0.2417542  -0.2018525  -0.3581041  -0.3040924
-β_ageSmk       : -0.078715   -0.0895067  -0.0791142  -0.0970527  -0.1159453  -0.1401688
-β_ageBMI       :  0           0           0           0          -0.003878    0.0068126
-β_ageEGFR      : -0.1637806  -0.1543702  -0.1671492  -0.1217081  -0.1884289  -0.1797778
-constant       : -3.307728   -3.031168   -3.819975   -3.500655   -4.310409   -3.946391
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 6 — MODEL B: ENHANCED ACR COEFFICIENTS (Table S12B)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-β_age          :  0.7969249   0.7768655   0.7201999   0.7141718   0.9145975   0.9111795
-β_nonHDLC      :  0.0256635   0.0659949   0.1135771   0.1602194   0           0
-β_HDLC         : -0.1588107  -0.0951111  -0.1493506  -0.1139086   0           0
-β_sbpLow       : -0.2255701  -0.420667   -0.0726677  -0.2719456  -0.4441346  -0.6693649
-β_sbpHigh      :  0.3396649   0.3120151   0.3436259   0.3058719   0.3260323   0.3290082
-β_dm           :  0.8047515   0.698521    0.7773094   0.6600631   0.9611365   0.8377655
-β_smk          :  0.5285338   0.4314669   0.4746662   0.3884022   0.5755787   0.4978917
-β_bmiLow       :  0           0           0           0           0.0008831  -0.042749
-β_bmiHigh      :  0           0           0           0           0.2988964   0.3624165
-β_egfrLow      :  0.4803511   0.3841364   0.3824646   0.2466316   0.5915291   0.5075796
-β_egfrHigh     :  0.0434472   0.009384    0.0394178   0.0151852   0.0556823   0.0137716
-β_antihtn      :  0.2985207   0.2676494   0.2125182   0.186167    0.3314097   0.2739963
-β_statin       : -0.1497787  -0.1390966  -0.0603046  -0.0894395   0           0
-β_treatSBP     : -0.0742889  -0.0579315  -0.0466053  -0.0411884  -0.1078596  -0.0645712
-β_treatChol    :  0.106756    0.1383719   0.0733118   0.1058212   0           0
-β_ageChol      : -0.0778126  -0.0488332  -0.0534262  -0.028089    0           0
-β_ageHDL       :  0.0306768   0.0200406   0.0325689   0.0240427   0           0
-β_ageSBP       : -0.0907168  -0.102454   -0.0999887  -0.0912325  -0.0875231  -0.1230039
-β_ageDM        : -0.2705122  -0.2236355  -0.2411762  -0.2004894  -0.356859   -0.3013297
-β_ageSmk       : -0.0830564  -0.089485   -0.0826941  -0.096936   -0.1220248  -0.1410318
-β_ageBMI       :  0           0           0           0          -0.0053637   0.0021531
-β_ageEGFR      : -0.1389249  -0.1321848  -0.1444737  -0.1022867  -0.1610389  -0.1548018
-constant       : -3.738341   -3.510705   -4.174614   -3.85146    -4.841506   -4.556907
-β_lnACR        :  0.1793037   0.1887974   0.1501217   0.1510073   0.2197281   0.2306299
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 7 — MODEL C: ENHANCED A1c COEFFICIENTS (Table S12C)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-β_age          :  0.7858178   0.7699177   0.7111831   0.7064146   0.8997391   0.911787
-β_nonHDLC      :  0.0194438   0.0605093   0.106797    0.1532267   0           0
-β_HDLC         : -0.1521964  -0.0888525  -0.1425745  -0.1082166   0           0
-β_sbpLow       : -0.2296681  -0.417713   -0.0736824  -0.2675288  -0.4422749  -0.6568071
-β_sbpHigh      :  0.3465777   0.3288657   0.3480844   0.3173809   0.3378691   0.3524645
-β_dm           :  0.5366241   0.4759471   0.5112951   0.432604    0.681284    0.5849752
-β_smk          :  0.5411682   0.4385663   0.4880292   0.3958842   0.5886005   0.5014014
-β_bmiLow       :  0           0           0           0          -0.0148657  -0.0512352
-β_bmiHigh      :  0           0           0           0           0.2958374   0.365294
-β_egfrLow      :  0.5931898   0.5334616   0.4754997   0.3665014   0.73447     0.6892219
-β_egfrHigh     :  0.0472458   0.0206431   0.0438132   0.0250243   0.05926     0.0292377
-β_antihtn      :  0.3158567   0.2917524   0.2259093   0.2061158   0.3543475   0.3038296
-β_statin       : -0.1535174  -0.1383313  -0.0648872  -0.0899988   0           0
-β_treatSBP     : -0.0687752  -0.0482622  -0.0437645  -0.0334959  -0.1002139  -0.0515032
-β_treatChol    :  0.1054746   0.1393796   0.0697082   0.1034168   0           0
-β_ageChol      : -0.0761119  -0.0463501  -0.0506382  -0.0255406   0           0
-β_ageHDL       :  0.0307469   0.0205926   0.0327475   0.0247538   0           0
-β_ageSBP       : -0.0905966  -0.1037717  -0.0996442  -0.0917441  -0.0878765  -0.1262343
-β_ageDM        : -0.2241857  -0.1737697  -0.1924338  -0.1499195  -0.303684   -0.2449514
-β_ageSmk       : -0.080186   -0.0915839  -0.0803539  -0.098089   -0.1178943  -0.1392217
-β_ageBMI       :  0           0           0           0          -0.008345    0.0009592
-β_ageEGFR      : -0.1667286  -0.1637039  -0.1682586  -0.1305231  -0.1912183  -0.1917105
-constant       : -3.306162   -3.040901   -3.838746   -3.51835    -4.288225   -3.961954
-β_a1cDM        :  0.1338348   0.13159     0.1339055   0.1157161   0.1856442   0.1652857
-β_a1cNoDM      :  0.1622409   0.1295185   0.1596461   0.1288303   0.1833083   0.1505859
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 8 — MODEL D: ENHANCED SDI COEFFICIENTS (Table S12D)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-β_age          :  0.7754083   0.7756377   0.7028123   0.7150087   0.8819156   0.894179
-β_nonHDLC      :  0.0221756   0.0715325   0.1056078   0.1627339   0           0
-β_HDLC         : -0.1650828  -0.0976775  -0.1502263  -0.1194988   0           0
-β_sbpLow       : -0.2180808  -0.5186614  -0.0488757  -0.363659   -0.4495491  -0.7067398
-β_sbpHigh      :  0.3381188   0.3235653   0.3402681   0.3179476   0.3457405   0.350241
-β_dm           :  0.8624372   0.7722496   0.838022    0.7156422   1.02632     0.9252453
-β_smk          :  0.4663953   0.3761129   0.4064592   0.3404477   0.5371646   0.4364765
-β_bmiLow       :  0           0           0           0          -0.0168447  -0.0866297
-β_bmiHigh      :  0           0           0           0           0.2805126   0.3706765
-β_egfrLow      :  0.5919004   0.5180893   0.4838394   0.3545754   0.7315223   0.6696768
-β_egfrHigh     :  0.0516821   0.0118451   0.0480415   0.0157875   0.0651679   0.0237374
-β_antihtn      :  0.3182166   0.2634094   0.2270648   0.1786233   0.3491487   0.2688352
-β_statin       : -0.1460816  -0.1455263  -0.0585626  -0.1018269   0           0
-β_treatSBP     : -0.0574455  -0.0367013  -0.0349485  -0.028313   -0.0890335  -0.0434892
-β_treatChol    :  0.1302287   0.1617785   0.1017299   0.1209467   0           0
-β_ageChol      : -0.083509   -0.0507669  -0.062389   -0.0285806   0           0
-β_ageHDL       :  0.0282181   0.0178356   0.0285106   0.0247348   0           0
-β_ageSBP       : -0.0952647  -0.1059337  -0.1033711  -0.0919494  -0.0971028  -0.1297155
-β_ageDM        : -0.2718966  -0.2236755  -0.2477845  -0.1981491  -0.3528078  -0.299086
-β_ageSmk       : -0.0641738  -0.0723216  -0.0544326  -0.0776891  -0.106216   -0.1079522
-β_ageBMI       :  0           0           0           0           0.0064998   0.0130483
-β_ageEGFR      : -0.1717026  -0.1548205  -0.1735372  -0.1284899  -0.1899413  -0.1797791
-constant       : -3.461564   -3.159572   -3.955898   -3.624712   -4.409382   -4.058977
-β_sdiMid       :  0.1442776   0.0889119   0.1473705   0.0728242   0.1343318   0.1235632
-β_sdiHigh      :  0.2421409   0.291897    0.2451878   0.2824453   0.2496522   0.3592212
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 9 — MODEL E: FULL COEFFICIENTS (Table S12E)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-── Core terms ──────────────────────────────────────────────────────────────────
-β_age          :  0.7716794   0.7847578   0.7023067   0.7128741   0.884209    0.9095703
-β_nonHDLC      :  0.0062109   0.0534485   0.0898765   0.1465201   0           0
-β_HDLC         : -0.1547756  -0.0911282  -0.1407316  -0.1125794   0           0
-β_sbpLow       : -0.1933123  -0.4921973  -0.0256648  -0.3387216  -0.421474   -0.6765184
-β_sbpHigh      :  0.3071217   0.2972415   0.314511    0.2980252   0.3002919   0.3111651
-β_dm           :  0.496753    0.4527054   0.4799217   0.399583    0.6170359   0.5535052
-β_smk          :  0.466605    0.3726641   0.4062049   0.3379111   0.5380269   0.4326811
-β_bmiLow       :  0           0           0           0          -0.0191335  -0.0854286
-β_bmiHigh      :  0           0           0           0           0.2764302   0.3551736
-β_egfrLow      :  0.4780697   0.3886854   0.3847744   0.2582604   0.5975847   0.5102245
-β_egfrHigh     :  0.0529077   0.0081661   0.0495174   0.0147769   0.0654197   0.015472
-β_antihtn      :  0.3034892   0.2508052   0.2133861   0.1686621   0.3313614   0.2570964
-β_statin       : -0.1556524  -0.1538484  -0.0678552  -0.1073619   0           0
-β_treatSBP     : -0.0667026  -0.0474695  -0.0451416  -0.0381038  -0.1002304  -0.0591177
-β_treatChol    :  0.1061825   0.1415382   0.0788187   0.1034169   0           0
-β_ageChol      : -0.0742271  -0.0436455  -0.0535985  -0.0228755   0           0
-β_ageHDL       :  0.0288245   0.0199549   0.0291762   0.0267453   0           0
-β_ageSBP       : -0.0875188  -0.1022686  -0.0961839  -0.0897449  -0.0845363  -0.1219056
-β_ageDM        : -0.2267102  -0.1762507  -0.2001466  -0.1497464  -0.2989062  -0.2437577
-β_ageSmk       : -0.0676125  -0.0715873  -0.0586472  -0.077206   -0.1111354  -0.105363
-β_ageBMI       :  0           0           0           0           0.0008104   0.0037907
-β_ageEGFR      : -0.1493231  -0.1428668  -0.1537791  -0.1198368  -0.1666635  -0.1660207
-constant       : -3.860385   -3.631387   -4.291503   -3.969788   -4.896524   -4.663513
-
-── uACR terms ──────────────────────────────────────────────────────────────────
-β_lnACR        :  0.1645922   0.1772853   0.1371824   0.1375837   0.1948135   0.2164607
-β_missingACR   :  0.0198413   0.1095674   0.0061613   0.0652944   0.0395368   0.1702805
-
-── HbA1c terms ─────────────────────────────────────────────────────────────────
-β_a1cDM        :  0.1298513   0.1165698   0.123192    0.101282    0.176668    0.148297
-β_a1cNoDM      :  0.1412555   0.1048297   0.1410572   0.1092726   0.1614911   0.1234088
-β_missingA1c   : -0.0031658  -0.0230072   0.005866   -0.0112852  -0.0010583  -0.0234637
-
-── SDI terms ───────────────────────────────────────────────────────────────────
-β_sdiMid       :  0.1361989   0.0802431   0.1413965   0.0651121   0.1213034   0.1106372
-  (SDI decile 4–6 vs reference 1–3)
-β_sdiHigh      :  0.2261596   0.275073    0.228136    0.2676683   0.2314147   0.3371204
-  (SDI decile 7–10 vs reference 1–3)
-β_missingSDI   :  0.1804508   0.144759    0.1588908   0.1388492   0.1819138   0.1694628
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SECTION 10 — ILLUSTRATIVE EXAMPLES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-0 of 3 → BASE (S12A). No novel variable terms.
-
-uACR only (1 of 3) → Enhanced ACR (S12B):
-  + B_lnACR × ln(UACR)
-
-HbA1c only (1 of 3) → Enhanced A1c (S12C):
-  + C_a1cDM × (HbA1c−5.3)×dm + C_a1cNoDM × (HbA1c−5.3)×(1−dm)
-
-ZIP/SDI only (1 of 3) → Enhanced SDI (S12D):
-  + D_sdiMid × sdiMid + D_sdiHigh × sdiHigh
-
-uACR + HbA1c (2 of 3) → FULL (S12E):
-  + E_lnACR × ln(UACR)
-  + E_a1cDM × (HbA1c−5.3)×dm + E_a1cNoDM × (HbA1c−5.3)×(1−dm)
-  + E_missingSDI                                       ← SDI absent
-
-uACR + ZIP/SDI decile=5 (2 of 3) → FULL (S12E):
-  + E_lnACR × ln(UACR)
-  + E_missingA1c                                       ← A1c absent
-  + E_sdiMid × 1                                       ← decile 5 → sdiMid=1
-
-HbA1c + ZIP/SDI decile=8 (2 of 3) → FULL (S12E):
-  + E_missingACR                                       ← ACR absent
-  + E_a1cDM × (HbA1c−5.3)×dm + E_a1cNoDM × (HbA1c−5.3)×(1−dm)
-  + E_sdiHigh × 1                                      ← decile 8 → sdiHigh=1
-
-All 3 provided → FULL (S12E), no missing indicators needed:
-  + E_lnACR × ln(UACR)
-  + E_a1cDM × (HbA1c−5.3)×dm + E_a1cNoDM × (HbA1c−5.3)×(1−dm)
-  + E_sdiMid × sdiMid + E_sdiHigh × sdiHigh
-
-================================================================================
-END OF DOCUMENT
-================================================================================
-
-`;
-
-export default preventFormulasRaw;
+export default preventFormulaTabs;

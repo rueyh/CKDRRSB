@@ -135,7 +135,7 @@
   },
   "outputs": {
     "krfe": "KFRE returns the predicted probability (%) of kidney failure (dialysis or transplant) within 2 years and within 5 years. A clinical 'risk level' label may also be shown for convenience.",
-    "prevent": "PREVENT returns 10-year risks (%): Total CVD (composite), ASCVD (MI/stroke/CV death), and Heart Failure (HF).",
+    "prevent": "PREVENT returns both 10-year and 30-year risks (%), toggleable in the results panel: Total CVD (composite), ASCVD (MI/stroke/CV death), and Heart Failure (HF). GDMT hazard ratios are applied to whichever time horizon is currently selected.",
     "kdigo": "KDIGO returns annual incidence rates (events per 1000 person-years) for: (1) Cardiovascular mortality and (2) CKD progression, based on eGFR–uACR category ('heat map')."
   },
   "formulas": {
@@ -608,5 +608,30 @@
         "doi": "https://doi.org/10.1093/eurheartj/ehab777"
       }
     }
+  },
+  "patientInputs": {
+    "age": "Both kidney and heart risks tend to change as people get older, because blood vessels and kidneys naturally change over time. Age is combined with your other results to estimate risk — it isn't a judgment about your health on its own.",
+    "sex": "On average, kidney and heart disease can progress somewhat differently in men and women. This is one of many factors the calculator combines to estimate your risk — it's simply part of the math, not a statement about you personally.",
+    "eGFR": "eGFR (estimated glomerular filtration rate) is a measure of how well your kidneys are filtering waste from your blood, calculated from a routine blood test. A lower eGFR means your kidneys are filtering less well, which is linked to a higher chance of future kidney and heart problems.",
+    "uACR": "uACR (urine albumin-to-creatinine ratio) measures how much protein is leaking into your urine, from a simple urine test. Higher levels can mean the tiny filters in your kidneys are damaged, which is linked to a higher chance of kidney and heart problems — even if your eGFR looks okay.",
+    "albumin": "Albumin is a protein made by your liver and carried in your blood, measured with a routine blood test. Lower blood albumin is often seen in more advanced kidney disease and is linked to a higher chance of kidney failure.",
+    "bicarbonate": "Bicarbonate is measured with a routine blood test and shows how well your body balances acid. As kidney disease becomes more advanced, bicarbonate levels tend to drop, which is linked to faster kidney disease progression.",
+    "calcium": "Calcium levels can shift as kidney disease advances, because healthy kidneys help control calcium, phosphate, and vitamin D. Lower calcium is linked to more advanced kidney disease and a higher chance of kidney failure.",
+    "totalCholesterol": "Total cholesterol measures the fats in your blood that can build up in artery walls over time. Higher total cholesterol is linked to a higher risk of heart disease — the calculator also looks at your HDL (\"good\") cholesterol alongside it to get a fuller picture.",
+    "hdlCholesterol": "HDL is often called \"good\" cholesterol because higher levels are linked to a lower risk of heart disease. Lower HDL is linked to somewhat higher heart risk.",
+    "sbp": "Systolic blood pressure is the top number in a blood pressure reading — the pressure in your arteries each time your heart beats. Higher blood pressure puts extra strain on your heart and blood vessels over time, which raises the risk of heart disease.",
+    "diabetes": "Diabetes means your body has trouble keeping blood sugar in a healthy range. Over time, this can damage blood vessels, which is why it raises the risk of both heart and kidney problems.",
+    "smoking": "Smoking damages blood vessels and raises the risk of heart disease. If you currently smoke, that's factored into your risk estimate — and quitting can lower your risk over time.",
+    "bmi": "BMI is a rough measure of body weight relative to height. A higher BMI is linked to a higher risk of heart problems, including heart failure, partly through its effects on blood pressure and blood sugar.",
+    "onStatin": "Statins are a common cholesterol-lowering medicine. If you're already taking one, the calculator takes that into account so your cholesterol numbers are interpreted correctly, rather than assuming they reflect an untreated picture.",
+    "hba1c": "HbA1c is a blood test that shows your average blood sugar level over the past 2–3 months. Higher HbA1c is linked to more blood vessel damage over time and a higher risk of heart disease.",
+    "sdi": "This reflects general information about the area where you live, such as access to healthcare and other resources. On average, people living in areas with fewer resources tend to have somewhat higher rates of heart disease, so the calculator includes this alongside your personal health information.",
+    "phosphate": "Phosphate is a mineral that healthy kidneys help remove from your blood. As kidney disease advances, phosphate can build up, which is linked to a higher chance of kidney failure.",
+    "onAntihypertensive": "This means you're currently taking medicine for high blood pressure. If so, the calculator takes that into account, since your blood pressure reading may already be lower than it would be without treatment."
+  },
+  "patientOutputs": {
+    "krfe": "These numbers estimate the chance that your kidneys could reach kidney failure (needing dialysis or a transplant) within the next 2 or 5 years. They come from research studies of large groups of people with kidney disease similar to yours. They're estimates meant to support a conversation with your doctor — not a certainty about what will happen to you.",
+    "prevent": "These numbers estimate your chance of having a heart-related problem — such as a heart attack, stroke, or heart failure — over the next 10 years or over the next 30 years (you can switch between the two). They come from research studies of large groups of people with health information similar to yours. They're estimates meant to support a conversation with your doctor — not a prediction of what will definitely happen.",
+    "kdigo": "These numbers show, out of a large group of people with kidney test results similar to yours, roughly how many tend to have a serious heart problem or worsening kidney disease each year. They come from research studies and are meant to help guide conversations with your doctor about your care."
   }
 }
